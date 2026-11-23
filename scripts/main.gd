@@ -211,8 +211,6 @@ func _apply() -> void:
 		down_vps[i].render_target_update_mode = SubViewport.UPDATE_ALWAYS if (bloom_on and i < levels) else SubViewport.UPDATE_DISABLED
 	for i in MAX_LEVELS - 1:
 		up_vps[i].render_target_update_mode = SubViewport.UPDATE_ALWAYS if (bloom_on and i < levels - 1) else SubViewport.UPDATE_DISABLED
-	final_mat.set_shader_parameter("vignette", 0.62 if fx_on else 0.0)
-	final_mat.set_shader_parameter("grade", 0.6 if (fx_on and not low) else 0.0)
 	_bloom = -1.0
 	_layout()
 
@@ -250,8 +248,8 @@ func _layout() -> void:
 		down_mats[i].set_shader_parameter("src", world_vp.get_texture() if i == 0 else down_vps[i - 1].get_texture())
 		down_mats[i].set_shader_parameter("src_px", Vector2(1.0 / src_size.x, 1.0 / src_size.y))
 		down_mats[i].set_shader_parameter("prefilter", i == 0)
-		down_mats[i].set_shader_parameter("threshold", 0.84)
-		down_mats[i].set_shader_parameter("knee", 0.15)
+		down_mats[i].set_shader_parameter("threshold", 0.90)
+		down_mats[i].set_shader_parameter("knee", 0.08)
 		down_mats[i].set_shader_parameter("spread", 2.0 if (i == 0 and base == 4) else 1.0)
 	for i in levels - 1:
 		up_vps[i].size = down_vps[i].size

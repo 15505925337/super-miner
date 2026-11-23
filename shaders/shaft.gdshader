@@ -15,5 +15,5 @@ void fragment() {
 	float cone = smoothstep(half_angle, half_angle * 0.25, a);
 	float fall = smoothstep(1.0, 0.0, d) * smoothstep(0.0, 0.06, d);
 	float streak = 0.75 + 0.25 * sin(atan(p.x, p.y) * 23.0 + seed * 7.0 + TIME * 0.35) * sin(atan(p.x, p.y) * 9.0 - TIME * 0.2 + seed);
-	COLOR = vec4(tint.rgb * cone * fall * fall * streak * strength, 1.0);
+	COLOR = vec4(tint.rgb * cone * fall * fall * streak * strength, COLOR.a);
 }

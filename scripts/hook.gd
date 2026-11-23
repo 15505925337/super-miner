@@ -9,10 +9,10 @@ const RING_FROM_MOUTH := Vector2(0, -156)     # 原图绳环 (128, 56)，爪口�
 
 @onready var rope: Line2D = $Rope
 @onready var rope_edge: Line2D = $RopeEdge
+@onready var rope_color := rope.default_color
 @onready var claw: Node2D = $Claw
 @onready var claw_sprite: Sprite2D = $Claw/Sprite
-@onready var halo: Sprite2D = $Claw/Halo
-@onready var light: PointLight2D = $Claw/Light
+@onready var blackout_light: PointLight2D = $Claw/BlackoutLight
 
 
 func _ready() -> void:
@@ -42,16 +42,11 @@ func apply(ang: float, length: float, closed: bool, frozen: bool, strong: bool, 
 	rope.points = pts
 	rope_edge.points = pts
 	claw_sprite.texture = TEX_CLOSED if closed else TEX_OPEN
-	rope.default_color = Color(0.77, 0.94, 1.0) if frozen else (Color(1.0, 0.64, 0.24) if strong else Color(0.89, 0.74, 0.52))
+	rope.default_color = Color(0.77, 0.94, 1.0) if frozen else (Color(1.0, 0.64, 0.24) if strong else rope_color)
 	claw_sprite.modulate = Color(0.6, 0.88, 1.0) if frozen else Color(1, 1, 1)
 
 
-# 黑灯的时候钩灯是主要的光：更亮、照得更远（d 从 0 到 1）
+# 只在黑灯事件里用小范围的真灯，光随事件淡入和淡出。
 func set_dark(d: float) -> void:
-	light.energy = 0.8 + 1.1 * d
-	light.texture_scale = 1.25 + 1.0 * d
-
-
-func set_fx(on: bool, lit: bool) -> void:
-	light.enabled = on and lit
-	halo.visible = on
+	blackout_light.energy = 0.8 * d
+	blackout_light.enabled = d > 0.0

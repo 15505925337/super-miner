@@ -17,7 +17,7 @@ const ART := {
 	"gem": "gem", "rub": "ruby", "bag": "bag", "tnt": "tnt", "bug": "beetle", "fos": "fossil",
 	"key": "key", "chest": "chest",
 }
-# 自发光强度：只在底图暗的层（熔岩层）起作用，保证暗处也认得出。值钱的亮一点，石头只留一点
+# 各物件的自发光比例。常态只略微提亮，黑灯时用来显出值钱矿物。
 const GLOW := {
 	"gs": 0.2, "gm": 0.18, "gl": 0.16, "gx": 0.16, "rs": 0.11, "rl": 0.11,
 	"gem": 0.5, "rub": 0.5, "bag": 0.14, "tnt": 0.2, "bug": 0.75, "fos": 0.14,

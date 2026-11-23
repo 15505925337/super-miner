@@ -85,13 +85,13 @@ func _process(dt: float) -> void:
 		sprite.position.y = sin(_walk_t * 16.0) * 0.75
 		glow.position.y = sprite.position.y
 	if light.visible:
-		light.energy = 0.7 + 0.12 * sin(_t * 2.3)
+		light.energy = 0.14 + 0.024 * sin(_t * 2.3)
 
 
-# glow：自发光强度（只有底图暗的层才需要）；rim：描边光（底图和物件颜色接近时用）
+# glow_amount：薄薄的自发光，黑灯时主要用来显出值钱矿物；rim：与底图同色时用的描边光。
 func set_look(fx: bool, lit: bool, glow_amount: float, rim: Color) -> void:
 	var g: float = Cfg.GLOW.get(kind, 0.1) * glow_amount
-	glow.visible = fx and g > 0.01
+	glow.visible = g > 0.01
 	glow.modulate = Color(g, g, g, 1.0)
 	shadow.visible = fx
 	spark.visible = fx and _sparkle
