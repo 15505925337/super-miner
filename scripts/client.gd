@@ -464,7 +464,7 @@ func fire_seat(seat: int) -> void:
 # 快捷喊话：只发编号。服务端限了频率（2 秒一次）
 func emote(k: int) -> void:
 	var ids := my_ids()
-	if ids.size() > 0 and ph() != "" and ph() != "lobby" and not solo_paused():
+	if ids.size() > 0 and ph() != "" and ph() != "lobby" and mode() != "solo":
 		Net.send({"t": "emote", "i": ids[0], "k": k})
 
 
@@ -481,7 +481,7 @@ func _unhandled_input(e: InputEvent) -> void:
 	if e is InputEventKey and e.pressed and not e.echo:      # 喊话和静音在哪个阶段都能按（输入框里打字时按键到不了这里）
 		var code0: int = e.physical_keycode if e.physical_keycode != 0 else e.keycode
 		var ei: int = EMOTE_KEYS.find(code0)
-		if ei >= 0 and ph() != "" and ph() != "lobby":
+		if ei >= 0 and ph() != "" and ph() != "lobby" and mode() != "solo":
 			emote(ei)
 			get_viewport().set_input_as_handled()
 			return

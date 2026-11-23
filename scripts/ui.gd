@@ -49,6 +49,7 @@ var hud_text: Control            # 井上的字都画在这里（在各个面板
 var rend: Control
 var shop: Control
 var over: Control
+var solo_over: Control
 var pause_btn: Button
 var pause_layer: Control
 var pause_shade: ColorRect
@@ -66,6 +67,7 @@ var toast_band: TextureRect
 var net_l: Label
 var rend_box: VBoxContainer
 var over_box: VBoxContainer
+var solo_over_box: VBoxContainer
 var shop_head: Label
 var shop_sub: Label
 var shop_timer: Label
@@ -175,7 +177,7 @@ func _ready() -> void:
 
 # 有面板开着（主场景据此把后面的游戏画面虚化、压暗）
 func menu_open() -> bool:
-	return home.visible or lobby.visible or rend.visible or shop.visible or over.visible or help.visible
+	return home.visible or lobby.visible or rend.visible or shop.visible or over.visible or solo_over.visible or help.visible
 
 
 # ───── 样式 ─────
@@ -796,9 +798,14 @@ func _fill_rend() -> void:
 
 # ───── 整场结束 ─────
 func _build_over() -> void:
+	var glow := Color(1.0, 0.76, 0.36, 0.42)
+	var glow_rect := Rect2(60, -40, 240, 130)
 	over = _panel(Rect2(140, 18, 360, 324))
-	over.add_child(_halo(Color(1.0, 0.76, 0.36, 0.42), Rect2(60, -40, 240, 130)))
+	over.add_child(_halo(glow, glow_rect))
 	over_box = _vbox(over, 14)
+	solo_over = _panel(Rect2(140, 72, 360, 216))
+	solo_over.add_child(_halo(glow, glow_rect))
+	solo_over_box = _vbox(solo_over, 14)
 
 
 func _fill_over() -> void:
@@ -807,12 +814,12 @@ func _fill_over() -> void:
 	if r.is_empty() or _sig.get("over", "") == sig:
 		return
 	_sig["over"] = sig
-	_clear(over_box)
-	var rows: Array = r.rows.duplicate()
 	var mode := String(r.mode)
 	if mode == "solo":
-		_fill_solo_over(int(r.round), int(rows[0].tt))
+		_fill_solo_over(int(r.round), int(r.rows[0].tt))
 		return
+	_clear(over_box)
+	var rows: Array = r.rows.duplicate()
 	var head := ""
 	var note := ""
 	var lines := []
@@ -868,28 +875,28 @@ func _fill_over() -> void:
 
 
 func _fill_solo_over(round_no: int, total: int) -> void:
+	_clear(solo_over_box)
 	var record: Dictionary = cl.update_solo_record(round_no, total)
 	var head := _title("闯到第 %d 关" % round_no, 28)
 	head.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	over_box.add_child(head)
-	over_box.add_child(Divider.new())
+	solo_over_box.add_child(head)
+	solo_over_box.add_child(Divider.new())
 	var earned := _l("本局一共挣了 %s" % Cfg.money(total), 16)
 	earned.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	over_box.add_child(earned)
+	solo_over_box.add_child(earned)
 	var best := _l("最高纪录　 第 %d 关　%s" % [record.round, Cfg.money(record.total)], 14, DIM)
 	best.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	over_box.add_child(best)
+	solo_over_box.add_child(best)
 	if record.is_new:
 		var badge := _title("新纪录！", 18)
 		badge.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		over_box.add_child(badge)
-	over_box.add_child(_spacer_v())
+		solo_over_box.add_child(badge)
 	var again := _b("再来一局", cl.again_solo, "again", "Primary")
 	again.custom_minimum_size.y = 40
 	again.add_theme_font_size_override("font_size", 18)
 	again.tooltip_text = "空格或回车"
-	over_box.add_child(again)
-	over_box.add_child(_b("回首页", cl.leave_solo, "over_leave"))
+	solo_over_box.add_child(again)
+	solo_over_box.add_child(_b("回首页", cl.leave_solo, "over_leave"))
 
 
 func _build_pause() -> void:
@@ -911,6 +918,7 @@ func _build_pause() -> void:
 	v.add_child(pause_actions)
 	resume_btn = _b("继续", func(): cl.request_solo_pause(false), "solo_resume", "Primary")
 	resume_btn.custom_minimum_size.y = 28
+	resume_btn.add_theme_font_size_override("font_size", 16)
 	pause_actions.add_child(resume_btn)
 	pause_actions.add_child(_b("回首页", _confirm_solo_leave.bind(true), "solo_leave"))
 	leave_confirm = VBoxContainer.new()
@@ -1289,18 +1297,21 @@ func refresh() -> void:
 	home_bg.visible = home.visible
 	lobby.visible = ph == "lobby" and not help.visible
 	hud.visible = ph == "play" or ph == "count"
+	var solo: bool = cl.mode() == "solo"
+	emo_btn.visible = not solo
+	if solo:
+		emo_box.visible = false
 	var paused: bool = cl.solo_paused()
 	pause_btn.visible = cl.solo_can_pause() and not paused
 	pause_layer.visible = paused
 	resume_btn.disabled = not Net.up
-	if paused:
-		emo_box.visible = false
-	else:
+	if not paused:
 		_confirm_solo_leave(false)
 	rend.visible = ph == "rend"
 	shop.visible = ph == "shop"
-	over.visible = ph == "over"
-	if not over.visible:
+	over.visible = ph == "over" and not solo
+	solo_over.visible = ph == "over" and solo
+	if ph != "over":
 		_sig.erase("over")
 	net_l.visible = not Net.up
 	if ph != "shop":
@@ -1318,7 +1329,7 @@ func refresh() -> void:
 		_fill_rend()
 	elif shop.visible:
 		_fill_shop()
-	elif over.visible:
+	elif ph == "over":
 		_fill_over()
 
 
