@@ -19,34 +19,12 @@ const LAVA_CRACKS := preload("res://art/relief_3_e.png")
 const LAVA_CRACK_STRENGTH := 0.60
 const DARK_AMBIENT := Color(0.06, 0.06, 0.09)
 const MINER_SIZE := 64.0
+const DARK_MINER_BRIGHTNESS := 0.40
 const MINER_SOURCE_SIZE := 512.0
 const WINCH_ROPE_EXIT := Vector2(256, 432)    # 四个矿工的各帧共用同一处绳卷出绳点
-# 头灯灯芯在 512×512 原图上的位置。每个姿势对应同名的矿工贴图。
-const HEAD_LAMPS := [
-	{
-		"idle": Vector2(153, 249), "idle2": Vector2(154, 258),
-		"crank1": Vector2(154, 250), "crank2": Vector2(154, 249), "crank3": Vector2(155, 264), "crank4": Vector2(158, 252),
-		"pull": Vector2(125, 253), "pull2": Vector2(119, 247), "happy": Vector2(146, 241), "happy2": Vector2(152, 222),
-		"sad": Vector2(165, 262), "hit": Vector2(152, 250), "throw": Vector2(205, 257),
-	},
-	{
-		"idle": Vector2(130, 246), "idle2": Vector2(129, 252),
-		"crank1": Vector2(129, 248), "crank2": Vector2(129, 248), "crank3": Vector2(169, 283), "crank4": Vector2(184, 253),
-		"pull": Vector2(119, 261), "pull2": Vector2(124, 263), "happy": Vector2(130, 246), "happy2": Vector2(129, 243),
-		"sad": Vector2(161, 267), "hit": Vector2(129, 248), "throw": Vector2(204, 288),
-	},
-	{
-		"idle": Vector2(145, 211), "idle2": Vector2(144, 216),
-		"crank1": Vector2(144, 211), "crank2": Vector2(149, 221), "crank3": Vector2(164, 256), "crank4": Vector2(184, 231),
-		"pull": Vector2(134, 235), "pull2": Vector2(101, 233), "happy": Vector2(145, 211), "happy2": Vector2(144, 196),
-		"sad": Vector2(144, 211), "hit": Vector2(139, 211), "throw": Vector2(149, 221),
-	},
-	{
-		"idle": Vector2(146, 205), "idle2": Vector2(146, 210),
-		"crank1": Vector2(146, 201), "crank2": Vector2(131, 206), "crank3": Vector2(166, 243), "crank4": Vector2(181, 233),
-		"pull": Vector2(120, 211), "pull2": Vector2(110, 227), "happy": Vector2(146, 205), "happy2": Vector2(146, 196),
-		"sad": Vector2(181, 243), "hit": Vector2(141, 205), "throw": Vector2(184, 211),
-	},
+const MINER_POSES := [
+	"idle", "idle2", "crank1", "crank2", "crank3", "crank4",
+	"pull", "pull2", "happy", "happy2", "sad", "hit", "throw",
 ]
 const FX_SEQUENCES := {
 	"boom": {"count": 6, "duration": 0.5, "coverage": 416.0 / 512.0, "alpha": 0.84},
@@ -56,18 +34,18 @@ const FX_SEQUENCES := {
 static var _fx_frames := {}
 
 # 以原画为主。井壁、远景和支架共用同一层的调色，环境光只在黑灯事件里压暗。
-#   grade [伽马, 对比度, 饱和度]；grade_tint 各色通道倍率；dark_glow 黑灯时值钱矿物的自发光；bloom 泛光强度
+#   grade [伽马, 对比度, 饱和度]；grade_tint 各色通道倍率；bag_chest_glow 宝袋和宝箱的黑灯倍率；bloom 泛光强度
 #   lights [灯芯位置, 颜色, 光柱（0 没有，1 朝下，2 斜着）]
 #   rim    哪些矿物在这一层和底图颜色太接近，要加描边光；dust 飘尘的颜色
 const TIERS := [
 	{   # 浅土层：保留原画里的土黄色和斜阳
-		"bg": "bg_1", "grade": Vector3.ONE, "dark_glow": 1.4, "bloom": 0.06,
+		"bg": "bg_1", "grade": Vector3.ONE, "bag_chest_glow": 1.4, "bloom": 0.06,
 		"ledge": 225.0,
 		"lights": [[Vector2(24, 15), Color(1, 0.9, 0.68), 2]],
 		"rim": {"fos": Color(0.3, 0.17, 0.09, 0.7)}, "dust": Color(1, 0.95, 0.8),
 	},
 	{   # 岩石层：两盏矿灯打下暖光，井壁是冷色的碎裂岩块
-		"bg": "bg_2", "grade": Vector3.ONE, "dark_glow": 1.85, "bloom": 0.06,
+		"bg": "bg_2", "grade": Vector3.ONE, "bag_chest_glow": 1.85, "bloom": 0.06,
 		"ledge": 233.0,
 		"lights": [
 			[Vector2(81, 51), Color(1, 0.7, 0.38), 1],
@@ -76,7 +54,7 @@ const TIERS := [
 		"rim": {"fos": Color(1, 0.92, 0.75, 0.5), "rs": Color(0.75, 0.82, 0.95, 0.4), "rl": Color(0.75, 0.82, 0.95, 0.4)}, "dust": Color(1, 0.92, 0.78),
 	},
 	{   # 晶洞层：提亮蓝紫色岩壁，支架蓝灯只留小光晕
-		"bg": "bg_3", "grade": Vector3(1.18, 1.02, 1.04), "dark_glow": 2.15, "bloom": 0.04,
+		"bg": "bg_3", "grade": Vector3(1.18, 1.02, 1.04), "bag_chest_glow": 2.15, "bloom": 0.04,
 		"ledge": 228.0,
 		"lights": [
 			[Vector2(135, 20), Color(0.56, 0.8, 1), 0],
@@ -87,7 +65,7 @@ const TIERS := [
 	},
 	{   # 熔岩层：井架挂灯，井壁保留原有的岩浆裂缝自发光
 		"bg": "bg_4", "grade": Vector3(1.34, 1.12, 1.40), "grade_tint": Vector3(1.08, 1.05, 0.60),
-		"dark_glow": 2.9, "bloom": 0.06,
+		"bag_chest_glow": 2.9, "bloom": 0.06,
 		"ledge": 216.0,
 		"lights": [[Vector2(151, 37), Color(1, 0.68, 0.36), 1]],
 		"rim": {"rs": Color(0.85, 0.8, 0.85, 0.4), "rl": Color(0.85, 0.8, 0.85, 0.4), "tnt": Color(1.0, 0.76, 0.47, 0.28)},
@@ -100,13 +78,13 @@ var fx_on := true
 var bloom := 0.06                # 当前层要的泛光强度，主场景来读
 var _k := 1.0
 var _items := {}                 # 物件 id → 节点
-var _miners := {}                # 玩家 id → { root, sprite, hook, frames, c }
+var _miners := {}                # 玩家 id → { root, sprite, hook, frames, ice }
 var _extra: Array[PointLight2D] = []
 var _t := 0.0
 var _tier := -1
 var _base := Vector2.ZERO         # 这口井在画面上的位置（震动是在它上面加一点偏移）
 var _shake := 0.0                 # 震动的幅度（游戏像素），自己衰减
-var _dark := 0.0                  # 黑灯的程度，0 正常，1 全黑（只剩钩灯、头灯和会发光的东西）
+var _dark := 0.0                  # 黑灯的程度，0 正常，1 最暗
 var _dark_want := 0.0
 var _dark_done := 0.0
 var _live_t := -1.0               # 这一关是从什么时候开始挖的（中途冒出来的东西要有个"掉下来"的动作）
@@ -217,8 +195,7 @@ func set_view(items: Array, players: Array, info: Dictionary) -> void:
 			n.kind = Cfg.type_key(it.t)
 			n.uid = id
 			items_root.add_child(n)
-			n.set_look(fx_on, _lit(), _glow_for(n.kind), conf.rim.get(n.kind, Color(1, 1, 1, 0)))
-			_fix_lights(n)
+			_set_item_look(n)
 			_items[id] = n
 			if live and _live_t >= 0.0 and _t - _live_t > 0.6:     # 开挖以后才冒出来的（丢来的石头、金矿雨、塌方）：从小变大弹一下
 				n.scale = Vector2.ONE * 0.15
@@ -251,8 +228,6 @@ func set_view(items: Array, players: Array, info: Dictionary) -> void:
 		m.sprite.texture = m.frames[frame]
 		# 动作帧已画好身体起伏，整张图保持固定，让木台贴着台沿。
 		m.root.position = Vector2(x, ledge - 31.8)
-		var head_lamp: Vector2 = HEAD_LAMPS[int(p.c) % HEAD_LAMPS.size()][frame]
-		m.head.position = (head_lamp - sprite_center) * source_scale
 		m.ice.visible = int(p.fz) == 1
 		var pivot := Vector2(x, y0)
 		var winch: Vector2 = m.root.position + (WINCH_ROPE_EXIT - sprite_center) * source_scale
@@ -261,7 +236,6 @@ func set_view(items: Array, players: Array, info: Dictionary) -> void:
 		var inactive: bool = int(p.get("out", 0)) == 1 or not bool(p.get("on", true))
 		m.root.modulate.a = 0.4 if inactive else 1.0
 		m.hook.visible = not inactive
-		m.head.visible = not inactive
 	for id in _miners.keys():
 		if not seen.has(id):
 			_miners[id].root.queue_free()
@@ -274,33 +248,26 @@ func _make_miner(c: int) -> Dictionary:
 	miners_root.add_child(root)
 	var base := "res://art/miner_%d" % (c % 4 + 1)
 	var frames := {}
-	for pose in HEAD_LAMPS[c % HEAD_LAMPS.size()]:
+	for pose in MINER_POSES:
 		frames[pose] = load(base + ("" if pose == "idle" else "_" + pose) + ".tres")
 	var sprite := Sprite2D.new()
 	sprite.texture = frames.idle
+	sprite.material = MAT_UNSHADED
 	sprite.scale = Vector2.ONE * MINER_SIZE / float(frames.idle.get_width())
 	root.add_child(sprite)
 	var ice := Sprite2D.new()
 	ice.texture = ICE
+	ice.material = MAT_UNSHADED
 	ice.scale = Vector2.ONE * MINER_SIZE / float(ICE.get_width())
 	ice.modulate.a = 0.48
 	ice.z_index = 63
 	ice.hide()
 	root.add_child(ice)
-	var head := PointLight2D.new()                # 黑灯时，头灯照亮矿工和脚下一小块
-	head.texture = LIGHT_TEX
-	head.texture_scale = 0.5
-	head.color = Color(1, 0.9, 0.7)
-	head.energy = 0.7 * _dark
-	head.height = 20.0
-	head.enabled = _dark > 0.0
-	root.add_child(head)
 	var hook: Node2D = HOOK.instantiate()
 	miners_root.add_child(hook)
-	hook.set_dark(_dark)
-	_fix_lights(root)
-	_fix_lights(hook)
-	return {"root": root, "sprite": sprite, "hook": hook, "frames": frames, "c": c, "head": head, "ice": ice}
+	var m := {"root": root, "sprite": sprite, "hook": hook, "frames": frames, "ice": ice}
+	_set_miner_dark(m, _dark)
+	return m
 
 
 func miner_pos(id: int) -> Vector2:
@@ -336,28 +303,34 @@ func shake(amount: float) -> void:
 		_shake = maxf(_shake, amount)
 
 
-# 黑灯时抬高值钱矿物的自发光，石头和炸药桶靠灯才看得清。
-func _glow_for(kind: String) -> float:
-	var normal := 0.12 if fx_on else 0.0
-	if kind in ["rs", "rl", "tnt"]:
-		return lerpf(normal, 0.0, _dark)
-	return lerpf(normal, float(TIERS[_tier].dark_glow), _dark)
+func _set_item_look(n: Node2D) -> void:
+	var conf: Dictionary = TIERS[_tier]
+	var levels: Vector2 = Cfg.GLOW.get(n.kind, Vector2.ZERO)
+	var dark_glow := levels.y
+	if n.kind in ["bag", "chest"]:
+		dark_glow *= float(conf.bag_chest_glow)
+	var rim: Color = conf.rim.get(n.kind, Color.TRANSPARENT)
+	rim.a *= 1.0 - _dark
+	n.set_look(fx_on, _lit(), _dark, lerpf(levels.x if fx_on else 0.0, dark_glow, _dark), rim)
+
+
+func _set_miner_dark(m: Dictionary, dark: float) -> void:
+	m.hook.set_dark(dark)
+	var brightness := lerpf(1.0, DARK_MINER_BRIGHTNESS, dark)
+	m.root.modulate = Color(brightness, brightness, brightness, m.root.modulate.a)
 
 
 # 黑灯是对局事件，所有画质和光影开关共用同一套明暗过渡。
 func _apply_dark() -> void:
-	var conf: Dictionary = TIERS[_tier]
 	var d := _dark
 	_dark_done = d
 	ambient.color = Color.WHITE.lerp(DARK_AMBIENT, d)
 	lights_root.modulate.a = 1.0 - d
 	embers.modulate.a = 1.0 - d
 	for n in _items.values():
-		n.set_look(fx_on, _lit(), _glow_for(n.kind), conf.rim.get(n.kind, Color(1, 1, 1, 0)))
+		_set_item_look(n)
 	for m in _miners.values():
-		m.hook.set_dark(d)
-		m.head.energy = 0.7 * d
-		m.head.enabled = d > 0.0
+		_set_miner_dark(m, d)
 
 
 # 单次播放。用同一组图中可见范围最大的一帧对齐目标尺寸。
@@ -497,10 +470,9 @@ func apply(q: int, fx: bool) -> void:
 	quality = q
 	fx_on = fx
 	var lit := _lit()
-	var conf: Dictionary = TIERS[maxi(_tier, 0)]
 	lights_root.visible = fx
 	for n in _items.values():
-		n.set_look(fx, lit, _glow_for(n.kind), conf.rim.get(n.kind, Color(1, 1, 1, 0)))
+		_set_item_look(n)
 	for n in fx_root.get_children():
 		if n.material == MAT_ADD:
 			n.visible = lit
@@ -527,17 +499,7 @@ func set_light_count(n: int) -> void:
 
 
 func light_count() -> int:
-	var count := 0
-	if _lit():
-		count += _extra.size()
-		for n in _items.values():
-			if n.light.visible:
-				count += 1
-	if _dark_done > 0.0:
-		for m in _miners.values():
-			if m.hook.visible:
-				count += 2
-	return count
+	return _extra.size() if _lit() else 0
 
 
 # 灯光高度要跟着放大倍数走，不然放大后光会显得更"贴地"

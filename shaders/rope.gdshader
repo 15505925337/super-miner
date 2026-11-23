@@ -1,5 +1,6 @@
 // 平铺模式下，宽 1 像素的绳芯每走 1 个设计像素，UV.x 增加 1。
 shader_type canvas_item;
+render_mode unshaded;
 
 void fragment() {
 	float phase = UV.x * 0.6 + (UV.y - 0.5) * 0.42;

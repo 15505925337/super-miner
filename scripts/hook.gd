@@ -1,4 +1,4 @@
-# 一个玩家的钩子（只负责画）：绳子、钩爪、钩灯。角度和绳长由服务端的状态决定。
+# 一个玩家的钩子（只负责画）：绳子和钩爪。角度和绳长由服务端的状态决定。
 extends Node2D
 
 const Cfg = preload("res://scripts/cfg.gd")
@@ -12,7 +12,6 @@ const RING_FROM_MOUTH := Vector2(0, -156)     # 原图绳环 (128, 56)，爪口�
 @onready var rope_color := rope.default_color
 @onready var claw: Node2D = $Claw
 @onready var claw_sprite: Sprite2D = $Claw/Sprite
-@onready var blackout_light: PointLight2D = $Claw/BlackoutLight
 
 
 func _ready() -> void:
@@ -46,7 +45,7 @@ func apply(ang: float, length: float, closed: bool, frozen: bool, strong: bool, 
 	claw_sprite.modulate = Color(0.6, 0.88, 1.0) if frozen else Color(1, 1, 1)
 
 
-# 只在黑灯事件里用小范围的真灯，光随事件淡入和淡出。
+# 黑灯时只留绳子和钩爪本身的颜色，保留瞄准所需的轮廓。
 func set_dark(d: float) -> void:
-	blackout_light.energy = 0.8 * d
-	blackout_light.enabled = d > 0.0
+	var brightness := lerpf(1.0, 0.34, d)
+	modulate = Color(brightness, brightness, brightness)

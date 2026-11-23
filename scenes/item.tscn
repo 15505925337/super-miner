@@ -1,10 +1,25 @@
-[gd_scene load_steps=6 format=3]
+[gd_scene load_steps=10 format=3]
 
 [ext_resource type="Script" path="res://scripts/item.gd" id="1"]
 [ext_resource type="Texture2D" path="res://res/soft_shadow.tres" id="2"]
 [ext_resource type="Material" path="res://res/mat_add.tres" id="3"]
 [ext_resource type="Texture2D" path="res://res/halo.tres" id="5"]
-[ext_resource type="Texture2D" path="res://res/light_radial.tres" id="6"]
+[ext_resource type="Shader" path="res://shaders/item_spark.gdshader" id="6"]
+
+[sub_resource type="Gradient" id="halo_gradient"]
+offsets = PackedFloat32Array(0, 0.45, 0.7, 1)
+colors = PackedColorArray(1, 1, 1, 1, 1, 1, 1, 0.65, 1, 1, 1, 0.3, 1, 1, 1, 0)
+
+[sub_resource type="GradientTexture2D" id="halo_texture"]
+gradient = SubResource("halo_gradient")
+width = 128
+height = 128
+fill = 1
+fill_from = Vector2(0.5, 0.5)
+fill_to = Vector2(1, 0.5)
+
+[sub_resource type="ShaderMaterial" id="spark_material"]
+shader = ExtResource("6")
 
 [node name="Item" type="Node2D"]
 script = ExtResource("1")
@@ -14,26 +29,23 @@ z_index = -1
 texture_filter = 2
 texture = ExtResource("2")
 
+[node name="Halo" type="Sprite2D" parent="."]
+visible = false
+z_index = -1
+material = ExtResource("3")
+texture_filter = 2
+texture = SubResource("halo_texture")
+
 [node name="Sprite" type="Sprite2D" parent="."]
 
 [node name="Glow" type="Sprite2D" parent="."]
-z_index = 50
-z_as_relative = false
+visible = false
 material = ExtResource("3")
 texture_filter = 4
 
 [node name="Spark" type="Sprite2D" parent="."]
-z_index = 51
-z_as_relative = false
-material = ExtResource("3")
+visible = false
+material = SubResource("spark_material")
 texture_filter = 2
 texture = ExtResource("5")
 scale = Vector2(0.05, 0.05)
-
-[node name="Light" type="PointLight2D" parent="."]
-visible = false
-color = Color(0.35, 0.85, 1, 1)
-energy = 0.14
-texture = ExtResource("6")
-texture_scale = 0.5
-height = 12.0

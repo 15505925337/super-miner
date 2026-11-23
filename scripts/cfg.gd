@@ -17,15 +17,17 @@ const ART := {
 	"gem": "gem", "rub": "ruby", "bag": "bag", "tnt": "tnt", "bug": "beetle", "fos": "fossil",
 	"key": "key", "chest": "chest",
 }
-# 各物件的自发光比例。常态只略微提亮，黑灯时用来显出值钱矿物。
+# 自发光的叠加比例（常态、全黑）。宝袋和宝箱沿用原来的分层黑灯倍率。
 const GLOW := {
-	"gs": 0.2, "gm": 0.18, "gl": 0.16, "gx": 0.16, "rs": 0.11, "rl": 0.11,
-	"gem": 0.5, "rub": 0.5, "bag": 0.14, "tnt": 0.2, "bug": 0.75, "fos": 0.14,
-	"key": 0.5, "chest": 0.22,
+	"gs": Vector2(0.024, 0.58), "gm": Vector2(0.0216, 0.53),
+	"gl": Vector2(0.0192, 0.48), "gx": Vector2(0.0192, 0.48),
+	"gem": Vector2(0.15, 0.77), "rub": Vector2(0.14, 0.77), "bug": Vector2(0.16, 0.77),
+	"key": Vector2(0.06, 0.76), "bag": Vector2(0.0168, 0.14), "chest": Vector2(0.0264, 0.22),
 }
+const GOLD := ["gs", "gm", "gl", "gx"]
 # 这些东西画的时候各带一个固定的倾斜角度（照原型）
-const TILT := ["gs", "gm", "gl", "gx", "rs", "rl", "fos"]
-const SPARKLE := ["gs", "gm", "gl", "gx", "gem", "rub", "bug", "key"]
+const TILT := GOLD + ["rs", "rl", "fos"]
+const SPARKLE := GOLD + ["gem", "rub", "bug", "key"]
 
 # 同一台设备上最多四个人，各用一组按键：放钩键、三个道具键
 const KEYSETS := [
