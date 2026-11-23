@@ -60,6 +60,7 @@ test('开店：货全上架时，各玩法只卖自己的道具', () => {
 test('开店：老板先打招呼，说今天什么特价', () => {
   const { room, ps: [p] } = shop();
   assert.ok(p.ksay.includes('今天' + SHOP[room.sale].n + '特价')); assert.equal(p.kn, 1);
+  assert.equal(p.ka, 'idle');
   assert.ok(p.mood >= 55 && p.mood < 80);
 });
 
@@ -69,6 +70,7 @@ test('按标价买：扣钱发货；钱不够买不了；道具最多 5 个；�
   const price = room.list.d;
   assert.equal(buyClick(room, p, 'd'), true); assert.equal(p.money, 2000 - price); assert.equal(p.tools.d, 2);
   assert.ok(['拿好。', '识货。', '好嘞，收你 ¥' + price + '。'].includes(p.ksay));
+  assert.equal(p.ka, 'smug');
   p.tools.d = 5; assert.equal(buy(room, p, 'd'), false, '已经 5 个了');
   assert.equal(buy(room, p, 'drink'), true); assert.equal(p.next.drink, 1); assert.equal(buy(room, p, 'drink'), false, '增益只能买一份');
   p.money = room.list.book - 10; assert.equal(buy(room, p, 'book'), false, '钱不够');
@@ -97,6 +99,7 @@ test('还价兜底：脑子想低于底价卖，不卖，要价改成底价', ()
   keeperAct(room, p, 'offer', 'drink', floor - 30, null, tick(), brain({ say: '行，卖你', action: 'accept' }));
   assert.equal(p.next.drink, undefined, '没成交'); assert.equal(p.money, 5000);
   assert.equal(p.deal.drink.ask, floor); assert.ok(p.ksay.includes('最低 ¥' + floor));
+  assert.equal(p.ka, 'sigh');
   assert.ok(floor < list);
 });
 
@@ -104,6 +107,7 @@ test('还价兜底：脑子的还价被夹在 [底价和出价里较高的, 当�
   const a = shop(); a.ps[0].money = 5000; a.ps[0].mood = 80;
   keeperAct(a.room, a.ps[0], 'offer', 'drink', 100, null, tick(), brain({ say: '白送', action: 'counter', price: 1 }));
   assert.equal(a.ps[0].deal.drink.ask, a.room.floor.drink, '还价太低，抬到底价');
+  assert.equal(a.ps[0].ka, 'sigh');
   const b = shop(); b.ps[0].money = 5000; b.ps[0].mood = 80;
   keeperAct(b.room, b.ps[0], 'offer', 'drink', 100, null, tick(), brain({ say: '涨价', action: 'counter', price: 99999 }));
   assert.equal(b.ps[0].deal.drink.ask, b.room.list.drink, '还价不会比当前要价高');
@@ -132,17 +136,67 @@ test('还价规矩：每件最多还 4 次；耐心掉光就不讲了；出价�
   assert.equal(p.deal.drink.tries, 4);
   keeperAct(room, p, 'offer', 'drink', 50, null, tick(), brain({ say: '卖', action: 'accept' }));
   assert.equal(p.ksay, '这件就这个价了，别磨了。'); assert.equal(p.deal.drink.tries, 4);
+  assert.equal(p.ka, 'refuse');
   p.money = 30; keeperAct(room, p, 'offer', 'd', 100, null, tick(), never);
   assert.equal(p.ksay, '你兜里都没这么多钱，还跟我讲价？'); assert.equal(p.deal.d.tries, 0, '不算一次还价');
+  assert.equal(p.ka, 'refuse');
   p.money = 5000; p.mood = 0; keeperAct(room, p, 'offer', 'd', 100, null, tick(), never);
-  assert.equal(p.ksay, '不讲了不讲了，就这个价，爱买不买。'); assert.equal(p.ka, 'angry'); assert.equal(p.deal.d.tries, 0);
+  assert.equal(p.ksay, '不讲了不讲了，就这个价，爱买不买。'); assert.equal(p.ka, 'refuse'); assert.equal(p.deal.d.tries, 0);
 });
 
 test('还价规矩：出价到了要价就成交，按要价和出价里较低的收钱', () => {
   const { room, ps: [p] } = shop(); p.money = 5000;
   const ask = room.list.d;
   keeperAct(room, p, 'offer', 'd', ask + 500, null, tick());
-  assert.equal(p.tools.d, 2); assert.equal(p.money, 5000 - ask); assert.equal(p.ka, 'happy');
+  assert.equal(p.tools.d, 2); assert.equal(p.money, 5000 - ask); assert.equal(p.ka, 'smug');
+});
+
+test('掌柜表情：正常还中间价时思考，出价太低大掉耐心时吃惊', () => {
+  const { room, ps: [p] } = shop();
+  p.money = 5000; p.mood = 60;
+  room.floor.drink = 180; room.list.drink = p.deal.drink.ask = 260;
+  const offer = (price: number) => keeperAct(room, p, 'offer', 'drink', price, null, tick(), c => ruleBrain(c, () => 0.99));
+  offer(190);
+  assert.equal(p.deal.drink.ask, 230);
+  assert.equal(p.ka, 'think');
+  offer(150);
+  assert.equal(p.deal.drink.ask, 190);
+  assert.equal(p.mood, 43);
+  assert.equal(p.ka, 'surprised');
+  offer(50);
+  assert.equal(p.deal.drink.ask, 190);
+  assert.equal(p.ka, 'surprised');
+  offer(50);
+  assert.equal(p.mood, 0);
+  assert.equal(p.ka, 'refuse');
+});
+
+test('掌柜表情：底价成交叹气，普通成交高兴，高价成交得意', () => {
+  for (const [price, face] of [[180, 'sigh'], [210, 'happy'], [240, 'smug']] as const) {
+    for (const direct of [true, false]) {
+      const { room, ps: [p] } = shop();
+      p.money = 5000;
+      room.floor.drink = 180; room.list.drink = p.deal.drink.ask = 270;
+      if (direct) {
+        p.deal.drink.ask = price;
+        assert.equal(buyClick(room, p, 'drink'), true);
+      } else {
+        keeperAct(room, p, 'offer', 'drink', price, null, tick(), brain({ say: '拿好。', action: 'accept' }));
+      }
+      assert.equal(p.money, 5000 - price);
+      assert.equal(p.next.drink, 1);
+      assert.equal(p.ka, face);
+    }
+  }
+});
+
+test('掌柜表情：普通招呼平静，夸奖高兴，骂人生气', () => {
+  const { room, ps: [p] } = shop();
+  assert.equal(p.ka, 'idle');
+  keeperAct(room, p, 'chat', '', null, '老板真帅', tick());
+  assert.equal(p.ka, 'happy');
+  keeperAct(room, p, 'chat', '', null, '你这黑店', tick());
+  assert.equal(p.ka, 'angry');
 });
 
 test('还价规矩：谈成了但买不了（已经有了），告诉玩家', () => {

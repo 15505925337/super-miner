@@ -172,6 +172,26 @@ test('商店里的消息：说话带数字又点着商品算出价，否则算�
   assert.equal(room.ph, 'count'); assert.equal(room.round, 2); assert.equal(p.buff.book, 1);
 });
 
+test('掌柜表情：下井后只向已准备的座位送别，直到离开商店', () => {
+  const { hub, conns: [host, guest], room } = hubWith(2);
+  hub.onMsg(host, { t: 'addLocal' });
+  const [p, other, local] = room.players;
+  openShop(room, ['d']);
+  hub.onMsg(host, { t: 'ready' });
+  steps(hub, 0.1);
+  assert.equal(room.ph, 'shop');
+  assert.deepEqual(last(host, 's').P.map((q: { i: number; ka: string }) => [q.i, q.ka]),
+    [[p.id, 'bye'], [other.id, 'idle'], [local.id, 'bye']]);
+  p.money = 500;
+  hub.onMsg(host, { t: 'buy', i: p.id, k: 'd' });
+  steps(hub, 0.1);
+  assert.equal(last(host, 's').P[0].ka, 'bye');
+  hub.onMsg(guest, { t: 'ready' });
+  steps(hub, 0.1);
+  assert.equal(room.ph, 'count');
+  assert.equal(last(host, 's').P[0].ka, undefined);
+});
+
 test('打完回房间：房主点"再来"，掉线的人被清掉，电脑留着', () => {
   const { hub, conns: [host, guest], room } = hubWith(2, 'vs');
   hub.onMsg(host, { t: 'addBot' }); hub.onMsg(host, { t: 'start' });

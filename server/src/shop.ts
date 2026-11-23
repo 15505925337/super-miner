@@ -61,10 +61,18 @@ export function buy(room: Room, p: Player, k: string): boolean {
   return true;
 }
 
+function saleFace(price: number, floor: number, list: number): string {
+  if (price === floor) return 'sigh';
+  // 成交价位于底价与标价之间靠近标价的三分之一。
+  return price >= floor + (list - floor) * 2 / 3 ? 'smug' : 'happy';
+}
+
 // 玩家直接按标价（或已经谈到的价）点"购买"
 export function buyClick(room: Room, p: Player, k: string): boolean {
   if (!buy(room, p, k)) return false;
-  p.ksay = pick(['拿好。', '好嘞，收你 ¥' + p.deal[k].ask + '。', '识货。'], room.rnd); p.ka = 'happy'; p.kn++;
+  const price = p.deal[k].ask;
+  p.ksay = pick(['拿好。', '好嘞，收你 ¥' + price + '。', '识货。'], room.rnd);
+  p.ka = saleFace(price, room.floor[k], room.list[k]); p.kn++;
   return true;
 }
 
@@ -109,9 +117,9 @@ export function keeperAct(room: Room, p: Player, kind: 'greet' | 'offer' | 'chat
   if (kind === 'offer') {
     offer = Math.round(Number(offerIn));
     if (!d || !(offer > 0)) return;
-    if (p.mood <= 0) return reply('不讲了不讲了，就这个价，爱买不买。', 'angry');
-    if (d.tries >= KEEPER.maxTries) return reply('这件就这个价了，别磨了。');
-    if (wallet(room, p).money < offer) return reply('你兜里都没这么多钱，还跟我讲价？');
+    if (p.mood <= 0) return reply('不讲了不讲了，就这个价，爱买不买。', 'refuse');
+    if (d.tries >= KEEPER.maxTries) return reply('这件就这个价了，别磨了。', 'refuse');
+    if (wallet(room, p).money < offer) return reply('你兜里都没这么多钱，还跟我讲价？', 'refuse');
     d.tries++; p.stats.haggles++;
   }
   const ctx: KeeperCtx = {
@@ -132,17 +140,22 @@ export function keeperApply(room: Room, p: Player, ctx: KeeperCtx, r: KeeperRepl
     if (ctx.kind === 'chat') p.flat = (p.flat || 0) + 1;
   }
   p.mood = clamp(p.mood + dm, 0, 100);
-  let reaction = dm <= -12 ? 'angry' : dm > 0 && ctx.kind !== 'greet' ? 'happy' : 'idle';
+  let reaction = dm <= -12 ? (ctx.kind === 'offer' ? 'surprised' : 'angry') : dm > 0 && ctx.kind !== 'greet' ? 'happy' : 'idle';
   if (ctx.kind === 'offer' && ctx.item && ctx.offer != null) {
     const k = ctx.item.key, d = p.deal[k], floor = room.floor[k];
     if (ctx.offer >= d.ask || (r.action === 'accept' && ctx.offer >= floor)) {
       d.ask = Math.min(d.ask, ctx.offer);
-      if (buy(room, p, k)) reaction = 'happy';
+      if (buy(room, p, k)) reaction = saleFace(d.ask, floor, room.list[k]);
       else say = '价是谈好了，可你这会儿买不了（钱不够，或者已经有了）。';
     } else if (r.action === 'accept') {                      // 脑子想低于底价卖：不行，改成还到底价
       d.ask = Math.min(d.ask, floor); say = '这个数真不行，最低 ¥' + d.ask + '。';
+      reaction = 'sigh';
     } else if (r.action === 'counter') {
       d.ask = round10(clamp(Number(r.price) || d.ask, Math.max(floor, ctx.offer), d.ask));
+      if (d.ask === floor) reaction = 'sigh';
+      else if (reaction !== 'surprised') reaction = 'think';
+    } else if (r.action === 'refuse' && (p.mood === 0 || reaction !== 'surprised')) {
+      reaction = 'refuse';
     }
   }
   p.ksay = say; p.ka = reaction; p.kn++; room.dirty = true;

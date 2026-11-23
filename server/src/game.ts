@@ -147,9 +147,10 @@ export function fire(room: Room, p: Player, a?: unknown): void {
 const removeItem = (f: Field, it: Item) => { f.items = f.items.filter(o => o !== it); };
 export function addMoney(room: Room, p: Player, v: number): void { wallet(room, p).money += v; p.earned += v; p.total += v; room.earned += v; }
 
-export function explode(room: Room, f: Field, it: Item): void {
+export function explode(room: Room, f: Field, it: Item, playerId?: number): void {
   removeItem(f, it);
-  ev(room, { e: 'boom', f: f.i, x: it.x, y: it.y, r: BOOM_R });
+  ev(room, { e: 'boom', f: f.i, x: it.x, y: it.y, r: BOOM_R,
+    ...(playerId === undefined ? {} : { p: playerId, src: 'tnt' }) });
   for (const o of f.items.slice()) {
     if (Math.hypot(o.x - it.x, o.y - it.y) > BOOM_R + o.r * 0.5) continue;
     if (o.t === TI.tnt) { if (!f.booms.some(b => b.id === o.id)) f.booms.push({ id: o.id, at: room.now + RULES.chainBoomDelay }); }   // 连环炸，稍等一下再响
@@ -187,7 +188,7 @@ export function collect(room: Room, p: Player, it: Item): void {
   for (const q of helpers) { q.st = RET; q.item = 0; q.stats.assists++; }
   if (helpers.length && room.mode === 'vs') {                // 对战合拉：主拉 70%，帮拉的分 30%
     const share = Math.round(v * RULES.vsAssistShare / helpers.length);
-    for (const q of helpers) { addMoney(room, q, share); ev(room, { e: 'get', p: q.id, v: share, s: '帮拉' }); }
+    for (const q of helpers) { addMoney(room, q, share); ev(room, { e: 'get', p: q.id, v: share, s: '帮拉', k }); }
     v = Math.round(v * (1 - RULES.vsAssistShare));
   } else if (helpers.length) { v = Math.round(v * RULES.coAssistBonus); label = label || '合拉'; }   // 合作合拉：多拿 10%
   addMoney(room, p, v);
@@ -205,7 +206,7 @@ export function useTool(room: Room, p: Player, k: string): void {
     if (p.st !== HAUL) return;
     const it = p.f!.items.find(o => o.id === p.item); if (!it) return;
     removeItem(p.f!, it); p.st = RET; p.item = 0;
-    ev(room, { e: 'boom', f: p.f!.i, x: it.x, y: it.y, r: RULES.dynamiteBoomR });
+    ev(room, { e: 'boom', f: p.f!.i, x: it.x, y: it.y, r: RULES.dynamiteBoomR, p: p.id, src: 'd' });
   } else if (k === 's') {                                    // 剪刀：谁在拉最值钱的货就剪谁，货掉在原地
     let target: Player | null = null, best = -1;
     for (const q of room.players) {
@@ -239,7 +240,7 @@ export function stepPlayer(room: Room, p: Player, dt: number): void {
       const it = f.items.find(o => Math.hypot(o.x - tx, o.y - ty) < o.r + HOOK_R);
       if (!it) continue;
       p.stats.hits++;
-      if (it.t === TI.tnt) { explode(room, f, it); p.st = RET; p.stats.tnt++; p.combo = 0; return; }
+      if (it.t === TI.tnt) { explode(room, f, it, p.id); p.st = RET; p.stats.tnt++; p.combo = 0; return; }
       const dx = it.x - p.x, dy = it.y - Y0;
       p.ang = Math.atan2(dx, dy); p.len = Math.max(MINL, Math.hypot(dx, dy) - it.r * RULES.itemGrabDepth); p.item = it.id;
       if (it.by) { p.st = AST; ev(room, { e: 'ast', f: f.i, x: it.x, y: it.y }); }      // 钩到别人正在拉的货 → 合拉
@@ -371,7 +372,7 @@ export function snapshot(room: Room): Record<string, any> {
     if (room.ph === 'shop') {                                // 商店：每个人各自谈到的价、老板对他说的话和耐心
       const ak: Record<string, number> = {};
       for (const k in p.deal) ak[k] = p.deal[k].ask;
-      q.ak = ak; q.ks = p.ksay; q.kn = p.kn; q.km = p.mood; q.ka = p.ka;
+      q.ak = ak; q.ks = p.ksay; q.kn = p.kn; q.km = p.mood; q.ka = p.ready ? 'bye' : p.ka;
     }
     return q;
   });

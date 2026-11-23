@@ -114,7 +114,7 @@ test('合拉分成：对战主拉 70%、帮拉 30%', () => {
   const evs = run(room, 10, () => p1.st === SW);
   assert.equal(p1.money, 350); assert.equal(p2.money, 150);
   assert.equal(p2.st, RET, '货到顶后帮拉的人空收');
-  assert.deepEqual(evs.filter(e => e.e === 'get').map(e => [e.p, e.v]), [[p2.id, 150], [p1.id, 350]]);
+  assert.deepEqual(evs.filter(e => e.e === 'get').map(e => [e.p, e.v, e.k]), [[p2.id, 150, 'gl'], [p1.id, 350, 'gl']]);
 });
 test('合拉分成：合作多拿 10%', () => {
   const { room, p1, it } = assistSetup('co'); it.w = 5.2;
@@ -153,6 +153,17 @@ test('炸药桶：别人正在拉的货也会被炸没，对方空收', () => {
   assert.ok(!room.fields[0].items.includes(gold), '金块被炸没了');
   tickRoom(room, DT);
   assert.equal(p1.st, RET); assert.equal(p1.item, 0); assert.equal(p1.money, 0);
+});
+
+test('爆炸事件：撞桶只标记出钩的玩家，连环炸没有触发者', () => {
+  const { room, ps: [, p] } = playing('vs', 2);
+  put(room, 0, 'tnt', p.x, 400);
+  put(room, 0, 'tnt', p.x - 80, 430);
+  fire(room, p);
+  const hit = run(room, 2, () => p.st === RET).filter(e => e.e === 'boom');
+  assert.deepEqual(hit, [{ e: 'boom', f: 0, x: p.x, y: 400, r: BOOM_R, p: p.id, src: 'tnt' }]);
+  const chain = run(room, 0.3).filter(e => e.e === 'boom');
+  assert.deepEqual(chain, [{ e: 'boom', f: 0, x: p.x - 80, y: 430, r: BOOM_R }]);
 });
 
 test('宝袋：开出什么由生成时定好的两个数决定', () => {
@@ -196,6 +207,15 @@ test('道具·炸药：只有正在拉货时能用，炸掉货马上收钩，不
   useTool(room, p, 'd');
   assert.equal(p.tools.d, 0); assert.equal(p.st, RET); assert.ok(!room.fields[0].items.includes(it));
   run(room, 3, () => p.st === SW); assert.equal(p.money, 0);
+});
+
+test('爆炸事件：使用炸药标记道具使用者和所属的井', () => {
+  const { room, ps: [, p] } = playing('race', 2);
+  put(room, 1, 'rl', p.x, 400);
+  fire(room, p);
+  run(room, 2, () => p.st === HAUL);
+  useTool(room, p, 'd');
+  assert.deepEqual(room.ev.filter(e => e.e === 'boom').map(e => [e.f, e.p, e.src]), [[1, p.id, 'd']]);
 });
 
 test('道具·剪刀：剪正在拉最值钱货的那个对手，货留在原地；没人拉货不消耗', () => {

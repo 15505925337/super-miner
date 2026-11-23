@@ -11,18 +11,46 @@ const LIGHT_TEX := preload("res://res/light_radial.tres")
 const HALO := preload("res://res/halo.tres")
 const MAT_ADD := preload("res://res/mat_add.tres")
 const MAT_UNSHADED := preload("res://res/mat_unshaded.tres")
+const ICE := preload("res://art/ice.png")
+const CHEST_OPEN := preload("res://art/chest_open.png")
 const SHAFT := preload("res://shaders/shaft.gdshader")
 const BG_SHADER := preload("res://shaders/bg.gdshader")
 const MINER_SIZE := 64.0
 const MINER_SOURCE_SIZE := 512.0
-const WINCH_ROPE_EXIT := Vector2(256, 432)    # 四个矿工的三种姿势共用同一处绳卷出绳点
-# 矿工头灯灯芯在原图上的位置，按平时、使劲拉、拉上来的姿势排列。
+const WINCH_ROPE_EXIT := Vector2(256, 432)    # 四个矿工的各帧共用同一处绳卷出绳点
+# 头灯灯芯在 512×512 原图上的位置。每个姿势对应同名的矿工贴图。
 const HEAD_LAMPS := [
-	{"idle": Vector2(153, 249), "pull": Vector2(125, 253), "happy": Vector2(146, 241)},
-	{"idle": Vector2(130, 246), "pull": Vector2(119, 261), "happy": Vector2(130, 246)},
-	{"idle": Vector2(145, 211), "pull": Vector2(134, 235), "happy": Vector2(145, 211)},
-	{"idle": Vector2(146, 205), "pull": Vector2(120, 211), "happy": Vector2(146, 205)},
+	{
+		"idle": Vector2(153, 249), "idle2": Vector2(154, 258),
+		"crank1": Vector2(154, 250), "crank2": Vector2(154, 249), "crank3": Vector2(155, 264), "crank4": Vector2(158, 252),
+		"pull": Vector2(125, 253), "pull2": Vector2(119, 247), "happy": Vector2(146, 241), "happy2": Vector2(152, 222),
+		"sad": Vector2(165, 262), "hit": Vector2(152, 250), "throw": Vector2(205, 257),
+	},
+	{
+		"idle": Vector2(130, 246), "idle2": Vector2(129, 252),
+		"crank1": Vector2(129, 248), "crank2": Vector2(129, 248), "crank3": Vector2(169, 283), "crank4": Vector2(184, 253),
+		"pull": Vector2(119, 261), "pull2": Vector2(124, 263), "happy": Vector2(130, 246), "happy2": Vector2(129, 243),
+		"sad": Vector2(161, 267), "hit": Vector2(129, 248), "throw": Vector2(204, 288),
+	},
+	{
+		"idle": Vector2(145, 211), "idle2": Vector2(144, 216),
+		"crank1": Vector2(144, 211), "crank2": Vector2(149, 221), "crank3": Vector2(164, 256), "crank4": Vector2(184, 231),
+		"pull": Vector2(134, 235), "pull2": Vector2(101, 233), "happy": Vector2(145, 211), "happy2": Vector2(144, 196),
+		"sad": Vector2(144, 211), "hit": Vector2(139, 211), "throw": Vector2(149, 221),
+	},
+	{
+		"idle": Vector2(146, 205), "idle2": Vector2(146, 210),
+		"crank1": Vector2(146, 201), "crank2": Vector2(131, 206), "crank3": Vector2(166, 243), "crank4": Vector2(181, 233),
+		"pull": Vector2(120, 211), "pull2": Vector2(110, 227), "happy": Vector2(146, 205), "happy2": Vector2(146, 196),
+		"sad": Vector2(181, 243), "hit": Vector2(141, 205), "throw": Vector2(184, 211),
+	},
 ]
+const FX_SEQUENCES := {
+	"boom": {"count": 6, "duration": 0.5, "coverage": 416.0 / 512.0, "alpha": 0.84},
+	"spark": {"count": 4, "duration": 0.3, "coverage": 336.0 / 512.0, "alpha": 0.95},
+	"dust": {"count": 4, "duration": 0.4, "coverage": 432.0 / 512.0, "alpha": 0.72},
+}
+static var _fx_frames := {}
 
 # 明暗对比（用户定的，要有反差感）。做法：
 #   环境光压得比较低、偏冷；真的灯放在底图里画着光源的位置，偏暖、够亮；
@@ -212,7 +240,7 @@ func set_view(items: Array, players: Array, info: Dictionary) -> void:
 			if live and _live_t >= 0.0 and _t - _live_t > 0.6:     # 开挖以后才冒出来的（丢来的石头、金矿雨、塌方）：从小变大弹一下
 				n.scale = Vector2.ONE * 0.15
 				n.create_tween().tween_property(n, "scale", Vector2.ONE, 0.32).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-				fx_boom(Vector2(it.x, it.y) * Cfg.S, 26.0, Color(0.8, 0.72, 0.6), 0.3)
+				fx_flash(Vector2(it.x, it.y) * Cfg.S, 26.0, Color(0.8, 0.72, 0.6), 0.3)
 		n.position = Vector2(it.x, it.y) * Cfg.S
 		n.walk_dx = float(it.get("walk_dx", 0.0))
 		n.modulate.a = 1.0 if live else 0.6
@@ -238,13 +266,11 @@ func set_view(items: Array, players: Array, info: Dictionary) -> void:
 		var hauling := st == 2 or st == 4
 		var frame := String(p.get("frame", "idle"))
 		m.sprite.texture = m.frames[frame]
-		# 512 像素原图的木台到 y≈510。保持 64×64 的绘制尺寸，把木台底边落在图里的台沿上。
-		var bob := sin(_t * 15.0) * 0.6 if hauling else sin(_t * 2.3 + int(p.c) * 2.0) * 0.35
-		var hop := -absf(sin(float(p.get("joy", 0.0)) * PI)) * 3.5
-		m.root.position = Vector2(x, ledge - 31.8 + hop + (bob if hauling else 0.0))
+		# 动作帧已画好身体起伏，整张图保持固定，让木台贴着台沿。
+		m.root.position = Vector2(x, ledge - 31.8)
 		var head_lamp: Vector2 = HEAD_LAMPS[int(p.c) % HEAD_LAMPS.size()][frame]
 		m.head.position = (head_lamp - sprite_center) * source_scale
-		m.sprite.modulate = Color(0.75, 0.95, 1.0) if int(p.fz) == 1 else Color(1, 1, 1)
+		m.ice.visible = int(p.fz) == 1
 		var pivot := Vector2(x, y0)
 		var winch: Vector2 = m.root.position + (WINCH_ROPE_EXIT - sprite_center) * source_scale
 		m.hook.position = pivot
@@ -263,11 +289,21 @@ func _make_miner(c: int) -> Dictionary:
 	var root := Node2D.new()
 	miners_root.add_child(root)
 	var base := "res://art/miner_%d" % (c % 4 + 1)
-	var frames := {"idle": load(base + ".tres"), "pull": load(base + "_pull.tres"), "happy": load(base + "_happy.tres")}
+	var frames := {}
+	for pose in HEAD_LAMPS[c % HEAD_LAMPS.size()]:
+		frames[pose] = load(base + ("" if pose == "idle" else "_" + pose) + ".tres")
 	var sprite := Sprite2D.new()
 	sprite.texture = frames.idle
 	sprite.scale = Vector2.ONE * MINER_SIZE / float(frames.idle.get_width())
 	root.add_child(sprite)
+	var ice := Sprite2D.new()
+	ice.texture = ICE
+	ice.scale = Vector2.ONE * MINER_SIZE / float(ICE.get_width())
+	ice.material = MAT_UNSHADED
+	ice.modulate.a = 0.48
+	ice.z_index = 63
+	ice.hide()
+	root.add_child(ice)
 	var head := PointLight2D.new()                # 头灯：照亮矿工自己和脚下一小块
 	head.texture = LIGHT_TEX
 	head.texture_scale = 0.5
@@ -281,7 +317,7 @@ func _make_miner(c: int) -> Dictionary:
 	hook.set_fx(fx_on, _lit())
 	_fix_lights(root)
 	_fix_lights(hook)
-	return {"root": root, "sprite": sprite, "hook": hook, "frames": frames, "c": c, "head": head}
+	return {"root": root, "sprite": sprite, "hook": hook, "frames": frames, "c": c, "head": head, "ice": ice}
 
 
 func miner_pos(id: int) -> Vector2:
@@ -345,9 +381,60 @@ func _apply_dark() -> void:
 		m.head.energy = 0.3 + 0.5 * d
 
 
-# 钩中时钩尖上闪一下
-func fx_hit(pos: Vector2, strong: bool) -> void:
-	fx_boom(pos, 30.0 if strong else 20.0, Color(1.0, 0.95, 0.8) if strong else Color(0.8, 0.8, 0.85), 0.16)
+# 单次播放。用同一组图中可见范围最大的一帧对齐目标尺寸。
+func _fx_sequence(kind: String, pos: Vector2, span: float) -> void:
+	var conf: Dictionary = FX_SEQUENCES[kind]
+	var frames: SpriteFrames = _fx_frames.get(kind)
+	if frames == null:
+		frames = SpriteFrames.new()
+		frames.set_animation_loop("default", false)
+		frames.set_animation_speed("default", float(conf.count) / float(conf.duration))
+		for i in range(1, int(conf.count) + 1):
+			frames.add_frame("default", load("res://art/%s_%d.png" % [kind, i]))
+		_fx_frames[kind] = frames
+	var s := AnimatedSprite2D.new()
+	s.sprite_frames = frames
+	s.material = MAT_UNSHADED
+	s.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+	s.scale = Vector2.ONE * span / (float(conf.coverage) * frames.get_frame_texture("default", 0).get_width())
+	s.position = pos
+	s.modulate.a = float(conf.alpha)
+	fx_root.add_child(s)
+	s.animation_finished.connect(s.queue_free)
+	s.play()
+	var duration := float(conf.duration)
+	s.create_tween().tween_property(s, "modulate:a", 0.0, duration * 0.5).set_delay(duration * 0.5)
+
+
+func fx_grab(pos: Vector2, kind: String) -> void:
+	var rock := kind in ["rs", "rl"]
+	var radius := float(Cfg.b().TYPES[Cfg.type_index(kind)].r) * Cfg.S
+	_fx_sequence("dust" if rock else "spark", pos, radius * 2.5)
+	if not rock:
+		fx_flash(pos, radius * 1.5, Color(1.0, 0.95, 0.8), 0.16, 0.4)
+
+
+func fx_chest(id: int) -> void:
+	var m: Dictionary = _miners.get(id, {})
+	if m.is_empty():
+		return
+	var pos: Vector2 = m.root.position + m.head.position + Vector2(14, -14)
+	pos.y = maxf(13.0, pos.y)
+	var s := Sprite2D.new()
+	s.texture = CHEST_OPEN
+	s.material = MAT_UNSHADED
+	s.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+	s.position = pos + Vector2(0, 7)
+	var full_scale := Vector2.ONE * 24.0 / float(CHEST_OPEN.get_width())
+	s.scale = full_scale * 0.4
+	fx_root.add_child(s)
+	var tw := s.create_tween().set_parallel(true)
+	tw.tween_property(s, "position", pos, 0.18).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	tw.tween_property(s, "scale", full_scale, 0.18).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tw.chain().tween_interval(1.0)
+	tw.chain().tween_property(s, "modulate:a", 0.0, 0.24)
+	tw.chain().tween_callback(s.queue_free)
+	_fx_sequence("spark", pos + Vector2(10, -2), 16.0)
 
 
 # 飘字：从某个位置往上飘、淡出
@@ -367,6 +454,7 @@ func fx_text(pos: Vector2, text: String, color: Color = Color(1, 0.88, 0.29), si
 	l.position = pos + Vector2(-80, -8)
 	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	l.text = text
+	l.z_index = 2
 	fx_root.add_child(l)
 	var tw := l.create_tween()
 	tw.set_parallel(true)
@@ -375,8 +463,15 @@ func fx_text(pos: Vector2, text: String, color: Color = Color(1, 0.88, 0.29), si
 	tw.chain().tween_callback(l.queue_free)
 
 
-# 爆炸：一团亮光迅速扩大再消失
-func fx_boom(pos: Vector2, radius: float, color: Color = Color(1, 0.75, 0.35), dur: float = 0.4) -> void:
+# 爆炸范围用半径换成直径，闪光叠在短暂的火球和烟上面。
+func fx_boom(pos: Vector2, radius: float) -> void:
+	_fx_sequence("boom", pos, radius * 2.0)
+	fx_flash(pos, radius, Color(1, 0.75, 0.35), 0.32, 0.6)
+
+
+func fx_flash(pos: Vector2, radius: float, color: Color, dur: float = 0.4, alpha: float = 1.0) -> void:
+	if not _lit():
+		return
 	for pass_i in 2:
 		var s := Sprite2D.new()
 		s.texture = HALO
@@ -384,9 +479,10 @@ func fx_boom(pos: Vector2, radius: float, color: Color = Color(1, 0.75, 0.35), d
 		s.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
 		s.position = pos
 		s.modulate = color if pass_i == 0 else Color(1, 1, 0.9, 1)
+		s.modulate.a *= alpha
+		s.z_index = 1
 		var r0 := radius / 64.0 * (0.5 if pass_i == 0 else 0.25)
 		s.scale = Vector2.ONE * r0
-		s.visible = fx_on
 		fx_root.add_child(s)
 		var tw := s.create_tween()
 		tw.set_parallel(true)
@@ -439,6 +535,9 @@ func apply(q: int, fx: bool) -> void:
 	for m in _miners.values():
 		m.hook.set_fx(fx, lit)
 		m.head.enabled = lit
+	for n in fx_root.get_children():
+		if n.material == MAT_ADD:
+			n.visible = lit
 	bg.material.set_shader_parameter("top_mul", 0.95 if fx else 1.0)       # 关掉光影时底图恢复原样
 	if not fx:
 		bg.material.set_shader_parameter("deep_mul", 1.0)

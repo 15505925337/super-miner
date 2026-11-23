@@ -10,6 +10,7 @@ const item = { kind: 'hd', shrink: 2, normal: N, draw: '边长 = 碰撞半径 ×
 const miner = { kind: 'hd', shrink: 2, normal: { ...N, bulge: 0.6 }, draw: '128×128，木台底边落在台沿上' };
 const claw = { kind: 'hd', shrink: 1, normal: N, draw: '60×60（含透明边），判定点在爪口中央，绳子接到绳环' };
 const keeper = { kind: 'img', shrink: 1, draw: '商店里的半身像' };
+const fx = { kind: 'img', shrink: 2, draw: '无光照的反馈图' };
 const icon = { kind: 'img', shrink: 2, draw: '道具栏和商店里的小图标' };
 const bg = { kind: 'bg', lossy: 0.9, draw: '1280×720 铺满，地面线在距顶 160 处' };
 
@@ -34,7 +35,17 @@ for (const n of [1, 2, 3, 4, 5]) {
   for (const pose of ['open', 'closed']) SPEC[`claw_${n}_${pose}`] = claw;
 }
 for (const n of [1, 2, 3, 4]) {
+  for (const pose of ['idle2', 'crank1', 'crank2', 'crank3', 'crank4', 'pull2', 'happy2', 'sad', 'hit', 'throw']) {
+    SPEC[`miner_${n}_${pose}`] = miner;
+  }
   for (const [part, draw] of Object.entries({ far: '远景后墙', frame: '支架层', fg: '前景剪影' })) {
     SPEC[`bg_${n}_${part}`] = { ...bg, draw };
   }
 }
+for (const face of ['think', 'surprised', 'sigh', 'smug', 'refuse', 'bye', 'neutral_blink', 'neutral_talk']) {
+  SPEC[`keeper_${face}`] = keeper;
+}
+for (const [name, count] of Object.entries({ boom: 6, spark: 4, dust: 4 })) {
+  for (let i = 1; i <= count; i++) SPEC[`${name}_${i}`] = fx;
+}
+SPEC.ice = fx;

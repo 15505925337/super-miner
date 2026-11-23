@@ -14,6 +14,7 @@ const SHOP_SHELF_Y := 201.0                       # 原图货架上沿 y≈603
 const SHOP_COUNTER_Y := 290.0                     # 原图柜台上沿 y≈870
 const SHOP_FACE_Y := 138.0
 const SHOP_CARD_WIDTH := 84.0
+const KEEPER_EXPRESSIONS := ["happy", "angry", "think", "surprised", "sigh", "smug", "refuse"]
 
 const MODE_DESC := {
 	"co": "共用一口井，钱算全队的，手里的钱到了累计目标才能进下一关。",
@@ -34,6 +35,9 @@ var _sig := {}                   # 各块内容的"指纹"，内容没变就不�
 var _toast_t := 0.0
 var _shop_sel := ""              # 商店里选中准备还价的商品
 var _face := ""
+var _keeper_faces := {}
+var _keeper_lines := {}         # 玩家 id → 当前话序、表情和收到它们的时间
+var _blink_at := -1.0
 var _t := 0.0
 var _draw_area := Rect2(0, 0, Cfg.GW, Cfg.GH)
 
@@ -1125,13 +1129,44 @@ func _fill_shop() -> void:
 	var km := int(p.get("km", 0))
 	shop_bar.value = km
 	shop_mood.text = "掌柜的耐心 %d" % km if km > 0 else "掌柜不想再讲价了"
-	var ka := String(p.get("ka", "idle"))
-	var face := "keeper_happy" if ka == "happy" else ("keeper_angry" if ka == "angry" else "keeper_neutral")
+	# 同机玩家各自保留表情计时，来回切座位不会重播旧回复。
+	for id in ids:
+		var state: Dictionary = cl.pstate(id)
+		var kn := int(state.get("kn", 0))
+		var ka := String(state.get("ka", "idle"))
+		var line: Dictionary = _keeper_lines.get(id, {})
+		if line.is_empty() or int(line.kn) != kn or String(line.ka) != ka:
+			_keeper_lines[id] = {"kn": kn, "ka": ka, "since": _t}
+	_update_keeper_face(pid)
+	shop_timer.text = "%d 秒后自动下井" % ceili(cl.time_left())
+
+
+func _update_keeper_face(pid: int) -> void:
+	var line: Dictionary = _keeper_lines.get(pid, {})
+	var ka := String(line.get("ka", "idle"))
+	var age := _t - float(line.get("since", _t))
+	var face := "neutral"
+	if ka == "bye" or (ka in KEEPER_EXPRESSIONS and age < 3.0):
+		_blink_at = -1.0
+		face = ka
+		if ka in ["happy", "angry"] and floori(age / 0.22) % 2 == 1:
+			face += "_move"
+	else:
+		if _blink_at < 0.0:
+			_blink_at = _t + randf_range(3.0, 5.0)
+		elif _t >= _blink_at + 0.15:
+			_blink_at = maxf(_blink_at, _t - 0.15) + randf_range(3.0, 5.0)
+		if ka == "idle" and int(line.get("kn", 0)) > 0 and age < 1.0:
+			if floori(age / 0.14) % 2 == 0:
+				face = "neutral_talk"
+		elif _t >= _blink_at:
+			face = "neutral_blink"
 	if face != _face:
 		_face = face
-		shop_face.texture = load("res://art/%s.png" % face)
-		shop_halo.modulate = Color(1.0, 0.42, 0.3, 0.55) if ka == "angry" else Color(1.0, 0.72, 0.36, 0.55)
-	shop_timer.text = "%d 秒后自动下井" % ceili(cl.time_left())
+		if not _keeper_faces.has(face):
+			_keeper_faces[face] = load("res://art/keeper_%s.png" % face)
+		shop_face.texture = _keeper_faces[face]
+		shop_halo.modulate = Color(1.0, 0.42, 0.3, 0.55) if face.begins_with("angry") else Color(1.0, 0.72, 0.36, 0.55)
 
 
 # ───── 刷新：按当前阶段决定显示哪一块 ─────
@@ -1156,6 +1191,8 @@ func refresh() -> void:
 	if ph != "shop":
 		_shop_sel = ""
 		_shop_hover = ""
+		_keeper_lines.clear()
+		_blink_at = -1.0
 		_sig.erase("shop")
 		_sig.erase("shelf")
 	if lobby.visible:
@@ -1185,6 +1222,7 @@ func _process(dt: float) -> void:
 		count_l.text = str(maxi(1, ceili(cl.time_left())))
 	elif cl.ph() == "shop":
 		shop_timer.text = "%d 秒后自动下井" % ceili(cl.time_left())
+		_update_keeper_face(_shop_pid())
 		var fl := 1.0 + 0.05 * sin(_t * 6.3) + 0.03 * sin(_t * 14.1)        # 店里的灯轻轻摇曳
 		shop_halo.modulate.a = 0.5 * fl
 		shop_face.position.y = SHOP_FACE_Y + sin(_t * 1.7) * 1.2           # 掌柜站着轻轻晃

@@ -19,7 +19,8 @@ var fires_sent := 0              # 发出了几次放钩
 var auto := false                 # 测试用：自动瞄准放钩（只有带 test=1 打开页面、并由联调脚本打开时才生效）
 var auto_gx := false              # 测试用：自动瞄准时主动去钩巨型金块（合作里要一个人先钩住、另一个人来帮）
 var _auto_ghost := 0.0
-var _joy := {}                   # 玩家 id → 刚拉上来东西的时刻（毫秒），开心 0.7 秒
+var _miner_reactions := {}      # 玩家 id → 中炸、扔炸药、收获各自的开始时间（毫秒）
+var _miner_motion := {}         # 玩家 id → 上次显示的帧、绞盘的播放进度
 var _t := 0.0
 var _emo := {}                   # 玩家 id → {text, t}：刚喊的话，在头上显示 3 秒
 var emo_seen := 0                # 一共看到几次喊话（联调脚本用）
@@ -30,6 +31,10 @@ var _tick_s := -1                # 最后几秒的滴答声响到第几秒了
 
 const EMOTE_KEYS := [KEY_Z, KEY_X, KEY_C, KEY_V, KEY_B, KEY_N]
 const EMOTE_KEY_NAMES := ["Z", "X", "C", "V", "B", "N"]
+
+const CRANK := ["crank1", "crank2", "crank3", "crank4"]
+const STRAIN := ["pull", "pull2"]
+const HEAVY_WEIGHT := 5.0
 
 const DEMO_ITEMS := [
 	{"id": -1, "t": 0, "x": 300, "y": 330, "by": 0}, {"id": -2, "t": 2, "x": 900, "y": 470, "by": 0}, {"id": -3, "t": 4, "x": 600, "y": 580, "by": 0},
@@ -99,6 +104,8 @@ func _on_meta(m: Dictionary) -> void:
 	if meta.is_empty() or String(meta.get("code", "")) != String(m.code):
 		prev = {}
 		cur = {}
+		_miner_reactions.clear()
+		_miner_motion.clear()
 		shop_seat = 0
 	meta = m
 	Net.set_url_room(String(m.code))
@@ -123,6 +130,9 @@ func _on_state(m: Dictionary) -> void:
 		m["fm"] = fm
 	prev = cur
 	cur = m
+	if not String(m.ph) in ["count", "play"]:
+		_miner_reactions.clear()
+		_miner_motion.clear()
 	for e in m.get("E", []):
 		_on_event(e)
 	changed.emit()
@@ -144,6 +154,8 @@ func _reset() -> void:
 	meta = {}
 	prev = {}
 	cur = {}
+	_miner_reactions.clear()
+	_miner_motion.clear()
 	Net.set_url_room("")
 	changed.emit()
 
@@ -168,11 +180,17 @@ func _on_event(e: Dictionary) -> void:
 			if seat_of(int(e.p)) >= 0:
 				Sfx.play("miss")
 		"grab":
-			var rock: bool = String(e.get("k", "")) in ["rs", "rl"]
+			var kind := String(e.get("k", ""))
+			var rock: bool = kind in ["rs", "rl"]
 			var mine := seat_of(int(e.p)) >= 0
 			var well: Node2D = main.well_for_field(int(e.get("f", 0)))
 			if well != null:
-				well.fx_hit(Vector2(float(e.x), float(e.y)) * s, not rock)
+				var p := pstate(int(e.p))
+				var tip := Vector2(float(e.x), float(e.y))
+				if not p.is_empty():
+					var ang := float(p.a)
+					tip = Vector2(float(p.x), float(Cfg.b().Y0)) + Vector2(sin(ang), cos(ang)) * float(p.l)
+				well.fx_grab(tip * s, kind)
 			if mine:                                     # 自己钩中：画面顿一下，值钱的顿得久一点
 				hitstop_until = now + (45.0 if rock else 75.0)
 				if well != null:
@@ -183,15 +201,20 @@ func _on_event(e: Dictionary) -> void:
 			var well: Node2D = main.well_for_player(id)
 			var v := int(e.v)
 			var mine := seat_of(id) >= 0
-			if v > 0:
-				_joy[id] = now
+			var kind := String(e.get("k", ""))
+			if kind in ["rs", "rl"]:
+				_react(id, "sad", now)
+			elif v > 0:
+				_react(id, "happy", now)
 			if well != null:
 				var label := String(e.get("s", ""))
 				well.fx_text(well.miner_pos(id) + Vector2(0, -34), ("+" + Cfg.money(v) if v > 0 else "") + (" " + label if label != "" else ""), pcolor(id) if v > 0 else Color(0.8, 0.8, 0.8), 1.5 if v >= 500 else 1.0)
 				if v >= 500:                             # 大钱：矿工身上闪一下金光，画面轻轻震一下
-					well.fx_boom(well.miner_pos(id), 60.0, Color(1.0, 0.85, 0.4))
+					well.fx_flash(well.miner_pos(id), 60.0, Color(1.0, 0.85, 0.4))
 					if mine:
 						well.shake(2.0)
+				if kind == "chest" and mode() == "co":
+					well.fx_chest(id)
 			if v >= 500:
 				Sfx.play("big", 1.0, 0.0 if mine else -6.0)
 			elif v > 0:
@@ -199,6 +222,12 @@ func _on_event(e: Dictionary) -> void:
 			elif mine:
 				Sfx.play("miss")
 		"boom":
+			if e.has("p"):
+				match String(e.get("src", "")):
+					"tnt":
+						_react(int(e.p), "hit", now)
+					"d":
+						_react(int(e.p), "throw", now)
 			var well: Node2D = main.well_for_field(int(e.get("f", 0)))
 			if well != null:
 				well.fx_boom(Vector2(float(e.x), float(e.y)) * s, float(e.r) * s)
@@ -259,6 +288,71 @@ func _on_event(e: Dictionary) -> void:
 			else:
 				say("灯亮了")
 				Sfx.play("go")
+
+
+func _react(id: int, pose: String, now: float) -> void:
+	var reactions: Dictionary = _miner_reactions.get_or_add(id, {})
+	if pose == "happy" or pose == "sad":
+		reactions["result"] = pose
+	reactions[pose] = now
+
+
+func _haul_speed(c: Dictionary, p: Dictionary, weight: float) -> float:
+	if c.has("hv"):
+		return 0.0
+	# 用快照里的游戏时间和收绳量，连同合拉、大力和帮拉角度的影响一起反映到动作中。
+	if not p.is_empty() and int(c.it) == int(p.it) and int(c.s) == int(p.s) and int(p.fz) == 0:
+		var dt := float(prev.tl) - float(cur.tl)
+		if dt > 0.0:
+			return maxf(0.0, (float(p.l) - float(c.l)) / dt)
+	var b := Cfg.b()
+	return float(b.HAUL_V) / weight * (float(b.STRONG) if int(c.sg) == 1 else 1.0)
+
+
+func _miner_frame(o: Dictionary, c: Dictionary, p: Dictionary, now: float) -> String:
+	var anim: Dictionary = _miner_motion.get_or_add(int(o.id), {"frame": "idle", "cycle": 0.0, "motion": "", "at": now})
+	var dt := (now - float(anim.at)) / 1000.0
+	anim.at = now
+	if int(o.fz) == 1:
+		return String(anim.frame)
+	var st := int(o.st)
+	var frame := "idle"
+	var motion := ""
+	var fps := 0.0
+	if st == 0:
+		frame = "idle2" if floori(now / 1000.0 + int(o.c) * 0.5) % 2 == 1 else "idle"
+	elif st == 3:
+		motion = "crank"
+		fps = 12.0
+	elif st == 2 or st == 4:
+		var items: Dictionary = cur.fm[int(o.fi)] if cur.has("fm") and int(o.fi) < cur.fm.size() else {}
+		var it: Array = items.get(int(c.it), [])
+		var weight := float(Cfg.b().TYPES[int(it[1])].w) if not it.is_empty() else 1.0
+		var speed := _haul_speed(c, p, weight)
+		if weight >= HEAVY_WEIGHT and int(o.sg) == 0:
+			motion = "strain"
+			fps = minf(10.0, 2.8 + speed / 90.0)
+		else:
+			motion = "crank"
+			fps = minf(18.0, 3.5 + speed / 95.0)
+	if motion != "":
+		var frames := STRAIN if motion == "strain" else CRANK
+		anim.cycle = fposmod(float(anim.cycle) + dt * fps, frames.size()) if anim.motion == motion else 0.0
+		frame = frames[floori(float(anim.cycle))]
+	anim.motion = motion
+
+	var reactions: Dictionary = _miner_reactions.get(int(o.id), {})
+	var happy_ms := now - float(reactions.get("happy", -1e9))
+	if now - float(reactions.get("hit", -1e9)) < 1000.0:
+		frame = "hit"
+	elif now - float(reactions.get("throw", -1e9)) < 400.0:
+		frame = "throw"
+	elif reactions.get("result") == "sad" and now - float(reactions.get("sad", -1e9)) < 800.0:
+		frame = "sad"
+	elif reactions.get("result") == "happy" and happy_ms < 700.0:
+		frame = "happy2" if happy_ms >= 200.0 and happy_ms < 460.0 else "happy"
+	anim.frame = frame
+	return frame
 
 
 # ───── 发给服务端的操作 ─────
@@ -449,7 +543,7 @@ func build_view() -> Dictionary:
 		var seat := seat_of(id)
 		var o := {
 			"id": id, "name": String(mp.name), "c": int(mp.c), "x": roundf(float(b.W) * (idx + 1) / (n + 1)), "fi": 0, "out": 0, "ps": 0,
-			"ang": float(b.AMP) * sin(_t * float(b.SWING) * 0.55 + idx * 1.7), "len": float(b.MINL), "st": 0, "fz": 0, "sg": 0, "seat": seat, "tag": "", "hint": "", "m": 0, "frame": "idle", "joy": 0.0, "on": bool(mp.get("on", true)),
+			"ang": float(b.AMP) * sin(_t * float(b.SWING) * 0.55 + idx * 1.7), "len": float(b.MINL), "st": 0, "fz": 0, "sg": 0, "seat": seat, "tag": "", "hint": "", "m": 0, "frame": "idle", "on": bool(mp.get("on", true)),
 		}
 		var c: Dictionary = pstate(id)
 		if not c.is_empty():
@@ -482,12 +576,7 @@ func build_view() -> Dictionary:
 						_pred.erase(id)
 				o.fz = int(c.fz)
 				o.sg = int(c.sg)
-				var since: float = now - float(_joy.get(id, -1e9))
-				if since < 700.0:
-					o.frame = "happy"
-					o.joy = since / 700.0
-				elif o.st == 2 or o.st == 4:
-					o.frame = "pull"
+				o.frame = _miner_frame(o, c, p, now)
 				# 矿工头上那行字：对战和分屏显示各自的钱；本机多人时再带上各自的道具和按键
 				var tag := Cfg.money(o.m) if mode() != "co" else ""
 				if int(c.sg) == 1:
