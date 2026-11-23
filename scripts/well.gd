@@ -75,11 +75,14 @@ const TIERS := [
 
 var quality: int = Cfg.Q.HIGH
 var fx_on := true
+var light_test_args := {}         # 只由主场景从网页网址传入
 var bloom := 0.06                # 当前层要的泛光强度，主场景来读
 var _k := 1.0
 var _items := {}                 # 物件 id → 节点
 var _miners := {}                # 玩家 id → { root, sprite, hook, frames, ice }
 var _extra: Array[PointLight2D] = []
+var _test_light: Light2D
+var _move_test_light := false
 var _t := 0.0
 var _tier := -1
 var _base := Vector2.ZERO         # 这口井在画面上的位置（震动是在它上面加一点偏移）
@@ -112,6 +115,7 @@ func _ready() -> void:
 	far.material = bm
 	frame_layer.material = bm
 	emis.texture = LAVA_CRACKS
+	_setup_light_test()
 	set_draw_area(Rect2(0, 0, Cfg.GW, Cfg.GH))
 	_set_tier(1)
 	apply(quality, fx_on)
@@ -119,6 +123,41 @@ func _ready() -> void:
 
 func _lit() -> bool:
 	return fx_on and quality != Cfg.Q.LOW
+
+
+func _setup_light_test() -> void:
+	match light_test_args.get("lt", ""):
+		"dir":
+			var directional := DirectionalLight2D.new()
+			# 正角度从朝下顺时针转。默认向右下方照，稍抬高以显示法线的明暗变化。
+			directional.rotation_degrees = fposmod(_light_test_number("ltd", -45.0), 360.0)
+			directional.height = 0.35
+			directional.energy = clampf(_light_test_number("lte", 0.2), 0.0, 1.0)
+			_test_light = directional
+			# 方向光忽略受光遮罩。底图由着色器排除，剪影和飘尘由无光照材质排除。
+			foreground.material = MAT_UNSHADED
+			dust.material = MAT_ADD
+		"occ":
+			var point := PointLight2D.new()
+			point.texture = LIGHT_TEX
+			point.texture_scale = 2.4
+			point.position = Vector2(320.0, 190.0)
+			point.height = 20.0
+			point.energy = 0.8
+			point.shadow_enabled = true
+			point.range_z_min = bg.z_index
+			point.range_z_max = 0
+			_test_light = point
+			_move_test_light = light_test_args.get("ltm", "0") == "1"
+	if _test_light != null:
+		add_child(_test_light)
+
+
+func _light_test_number(key: String, fallback: float) -> float:
+	var value := String(light_test_args.get(key, ""))
+	if value.is_valid_float() and is_finite(value.to_float()):
+		return value.to_float()
+	return fallback
 
 
 func _set_tier(tier: int) -> void:
@@ -194,6 +233,7 @@ func set_view(items: Array, players: Array, info: Dictionary) -> void:
 			n = ITEM.instantiate()
 			n.kind = Cfg.type_key(it.t)
 			n.uid = id
+			n.cast_test_shadow = _test_light is PointLight2D
 			items_root.add_child(n)
 			_set_item_look(n)
 			_items[id] = n
@@ -256,7 +296,7 @@ func _make_miner(c: int) -> Dictionary:
 		frames[pose] = load(base + ("" if pose == "idle" else "_" + pose) + ".tres")
 	var sprite := Sprite2D.new()
 	sprite.texture = frames.idle
-	sprite.material = MAT_UNSHADED
+	sprite.material = null if _test_light is DirectionalLight2D and _test_light.enabled else MAT_UNSHADED
 	sprite.scale = Vector2.ONE * MINER_SIZE / float(frames.idle.get_width())
 	root.add_child(sprite)
 	var ice := Sprite2D.new()
@@ -329,6 +369,9 @@ func _apply_dark() -> void:
 	var d := _dark
 	_dark_done = d
 	ambient.color = Color.WHITE.lerp(DARK_AMBIENT, d)
+	if _test_light is DirectionalLight2D:
+		foreground.self_modulate = ambient.color
+		dust.self_modulate = ambient.color
 	lights_root.modulate.a = 1.0 - d
 	embers.modulate.a = 1.0 - d
 	for n in _items.values():
@@ -467,6 +510,8 @@ func _process(dt: float) -> void:
 	for i in _extra.size():
 		var a := _t * (0.25 + 0.05 * i) + i * 1.7
 		_extra[i].position = Vector2(320.0 + cos(a) * (120.0 + 22.0 * (i % 5)), 215.0 + sin(a * 1.3) * 95.0)
+	if _move_test_light:
+		_test_light.position.x = 320.0 + 240.0 * sin(_t * TAU / 12.0)
 
 
 # 画质和光影开关控制装饰效果，黑灯事件由 _apply_dark 处理。
@@ -484,6 +529,11 @@ func apply(q: int, fx: bool) -> void:
 	dust.visible = fx and q != Cfg.Q.LOW
 	for l in _extra:
 		l.enabled = lit
+	if _test_light != null:
+		_test_light.enabled = lit
+		if _test_light is DirectionalLight2D:
+			for m in _miners.values():
+				m.sprite.material = null if lit else MAT_UNSHADED
 
 
 # 压力测试：把同屏真灯的总数加到 n 盏（多出来的在井里转圈）
@@ -503,7 +553,7 @@ func set_light_count(n: int) -> void:
 
 
 func light_count() -> int:
-	return _extra.size() if _lit() else 0
+	return _extra.size() + int(_test_light != null) if _lit() else 0
 
 
 # 灯光高度要跟着放大倍数走，不然放大后光会显得更"贴地"

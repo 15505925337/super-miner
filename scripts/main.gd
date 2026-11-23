@@ -17,6 +17,7 @@
 #   bench=<秒>       测这么多秒的帧率  lights=<数量> 把同屏真灯加到这么多盏（压力测试）
 #   hud=1            显示左上角的调试文字    test=1   打开自动测试用的接口
 #   hookdbg=1        显示每个钩爪的抓取判定圆
+#   网页专用：lt=dir 测方向光（lte 调亮度、ltd 调角度），lt=occ 测投影（ltm=1 让灯横移）
 # 调试按键：[ 和 ] 换画质，\ 开关光影，` 显示或隐藏调试文字。
 extends Node
 
@@ -73,6 +74,7 @@ func _ready() -> void:
 	var qi := Cfg.Q_NAMES.find(String(args.get("q", "high")))
 	quality = qi if qi >= 0 else Cfg.Q.HIGH
 	fx_on = String(args.get("fx", "1")) != "0"
+	var light_test_args := args if is_web else {}
 
 	# 分屏用的四块小画布，要排在玩法层前面，保证同一帧里先画好
 	for i in int(Cfg.b().MAXP):
@@ -80,6 +82,7 @@ func _ready() -> void:
 		vp.size = PANE_SIZE
 		vp.render_target_update_mode = SubViewport.UPDATE_DISABLED
 		var w: Node2D = WELL.instantiate()
+		w.light_test_args = light_test_args
 		w.scale = Vector2.ONE * (PANE_SIZE.x / float(Cfg.GW))
 		vp.add_child(w)
 		add_child(vp)
@@ -88,6 +91,7 @@ func _ready() -> void:
 
 	world_vp = _make_vp()
 	well = WELL.instantiate()
+	well.light_test_args = light_test_args
 	world_vp.add_child(well)
 	var mid := CanvasLayer.new()
 	mid.layer = 5

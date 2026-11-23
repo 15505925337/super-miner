@@ -16,6 +16,7 @@ const HALOS := {
 
 var kind := "gs"                 # 类型代号，见 shared/balance.json 的 TYPES
 var uid := 0                     # 物件 id，决定固定的形状和倾斜角度
+var cast_test_shadow := false    # 投影实测时才给金块和石头挂遮挡轮廓
 var walk_dx := 0.0               # 晶甲虫在相邻两帧服务端状态中的横向位移
 var _t := 0.0
 var _detail := false
@@ -53,6 +54,8 @@ func _ready() -> void:
 	sprite.material = _mat
 	# 照原型的画法：整张图画成边长 = 碰撞半径 × 2.5 的正方形
 	var r: float = float(Cfg.b().TYPES[Cfg.type_index(kind)].r)
+	if cast_test_shadow and (gold or kind in ["rs", "rl"]):
+		_add_test_occluder(r * Cfg.S * 0.8)
 	var d: float = r * 2.5 * Cfg.S
 	var sc: float = d / float(sprite.texture.get_width())
 	sprite.scale = Vector2(sc, sc)
@@ -83,6 +86,18 @@ func _ready() -> void:
 	spark.position = Vector2(-r * 0.3 * Cfg.S, -r * 0.35 * Cfg.S)
 	if kind in Cfg.SPARKLE:
 		_spark_at = randf_range(0.35, 2.1)
+
+
+func _add_test_occluder(radius: float) -> void:
+	var points := PackedVector2Array()
+	for i in 10:
+		points.append(Vector2.from_angle(TAU * i / 10.0) * radius)
+	var polygon := OccluderPolygon2D.new()
+	polygon.polygon = points
+	var occluder := LightOccluder2D.new()
+	occluder.occluder = polygon
+	occluder.sdf_collision = false
+	add_child(occluder)
 
 
 func _process(dt: float) -> void:
