@@ -59,7 +59,10 @@ var pause_actions: VBoxContainer
 var leave_confirm: VBoxContainer
 var name_edit: LineEdit
 var code_edit: LineEdit
+var solo_role_name: Label
+var solo_role_skill: Label
 var lobby_box: VBoxContainer
+var lobby_pick_id := 0
 var tools_bar: HBoxContainer
 var count_l: Label
 var toast_l: Label
@@ -401,6 +404,18 @@ func _dot(c: Color) -> ColorRect:
 	return d
 
 
+func _portrait(c: int, height: int, cb: Callable, key: String) -> Button:
+	var b := _b("", cb, key, "Small")
+	b.icon = load("res://art/miner_%d.png" % (c + 1))
+	b.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	b.expand_icon = true
+	b.custom_minimum_size = Vector2(height, height)
+	b.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+	var role := Cfg.character(c)
+	b.tooltip_text = "%s · %s" % [role.n, role.d]
+	return b
+
+
 # ───── 首页 ─────
 func _build_home() -> void:
 	home_bg = _screen_bg(preload("res://art/home_bg.png"))
@@ -408,15 +423,31 @@ func _build_home() -> void:
 	home = _panel(Rect2(160, 16, 320, 328))
 	home.add_child(_halo(Color(1.0, 0.74, 0.36, 0.5), Rect2(40, -34, 240, 150)))
 	var v := _vbox(home, 14)
-	v.add_child(_pic("res://art/logo.png", Vector2(0, 74)))
+	v.add_child(_pic("res://art/logo.png", Vector2(0, 68)))
 	v.add_theme_constant_override("separation", 2)
 	var solo := _b("单人闯关", func(): cl.create("solo", name_edit.text), "create_solo", "Primary")
 	solo.custom_minimum_size.y = 34
 	solo.add_theme_font_size_override("font_size", 18)
 	v.add_child(solo)
-	var sub := _l("一个人挖，每关达到目标就过关", 12, DIM)
-	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	v.add_child(sub)
+	var picks := _hbox([_spacer()])
+	var group := ButtonGroup.new()
+	for c in Cfg.b().CHARACTERS.size():
+		var portrait := _portrait(c, 30, _pick_solo_character.bind(c), "solo_role_%d" % c)
+		portrait.toggle_mode = true
+		portrait.button_group = group
+		portrait.button_pressed = c == cl.solo_character
+		picks.add_child(portrait)
+	var details := VBoxContainer.new()
+	details.custom_minimum_size.x = 106
+	details.add_theme_constant_override("separation", 0)
+	solo_role_name = _l("", 12)
+	solo_role_skill = _l("", 11, DIM)
+	details.add_child(solo_role_name)
+	details.add_child(solo_role_skill)
+	picks.add_child(details)
+	picks.add_child(_spacer())
+	v.add_child(picks)
+	_show_solo_character(cl.solo_character)
 	v.add_child(Divider.new())
 	name_edit = _edit("起个名字（最多 10 个字）", 10, "name_edit")
 	name_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -432,6 +463,18 @@ func _build_home() -> void:
 	code_edit.custom_minimum_size = Vector2(90, 0)
 	code_edit.text_submitted.connect(func(_t): cl.join(code_edit.text, name_edit.text))
 	v.add_child(_hbox([_l("进别人的房间", 12, GOLD), _spacer(), code_edit, _b("进房间", func(): cl.join(code_edit.text, name_edit.text), "join")]))
+
+
+func _pick_solo_character(c: int) -> void:
+	cl.set_solo_character(c)
+	_show_solo_character(c)
+
+
+func _show_solo_character(c: int) -> void:
+	var role := Cfg.character(c)
+	solo_role_name.text = String(role.n)
+	solo_role_name.add_theme_color_override("font_color", Cfg.COLORS[c])
+	solo_role_skill.text = String(role.d)
 
 
 # 整屏底图与井下用同一比例，超出原图的部分镜像延展。
@@ -460,20 +503,23 @@ func set_draw_area(area: Rect2) -> void:
 
 # ───── 房间（等人） ─────
 func _build_lobby() -> void:
-	lobby = _panel(Rect2(110, 26, 420, 308))
-	lobby_box = _vbox(lobby, 14)
+	lobby = _panel(Rect2(110, 12, 420, 336))
+	lobby_box = _vbox(lobby, 12)
+	lobby_box.add_theme_constant_override("separation", 2)
 
 
 func _fill_lobby() -> void:
 	var m: Dictionary = cl.meta
-	var sig := JSON.stringify([m.code, m.mode, m.rounds, m.players, m.host, m.you])
+	var mine: Array = cl.my_ids()
+	if not mine.has(lobby_pick_id):
+		lobby_pick_id = int(mine[0]) if not mine.is_empty() else 0
+	var sig := JSON.stringify([m.code, m.mode, m.rounds, m.players, m.host, m.you, m.get("urls", []), lobby_pick_id])
 	if _sig.get("lobby", "") == sig:
 		return
 	_sig["lobby"] = sig
 	_clear(lobby_box)
 	var host: bool = cl.is_host()
 	var mode := String(m.mode)
-	var mine: Array = cl.my_ids()
 	lobby_box.add_child(_hbox([_title("房间 " + String(m.code), 24), _spacer(), _title(String(Cfg.b().MODE_NAMES[mode]), 16, CREAM)]))
 	lobby_box.add_child(Divider.new())
 	var link := LineEdit.new()
@@ -481,30 +527,37 @@ func _fill_lobby() -> void:
 	link.editable = false
 	link.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	lobby_box.add_child(_hbox([_l("邀请地址", 12, GOLD), link]))
-	for u in m.get("urls", []):
-		lobby_box.add_child(_l("同一 WiFi：" + String(u) + "/?r=" + String(m.code), 12, DIM))
+	var urls: Array = m.get("urls", [])
+	if not urls.is_empty():
+		var network_links := VBoxContainer.new()
+		network_links.add_theme_constant_override("separation", 0)
+		for u in urls:
+			network_links.add_child(_l("同一 WiFi：" + String(u) + "/?r=" + String(m.code), 12, DIM))
+		var links_scroll := ScrollContainer.new()
+		links_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+		links_scroll.add_child(network_links)
+		lobby_box.add_child(links_scroll)
+		var row_height := network_links.get_combined_minimum_size().y / urls.size()
+		links_scroll.custom_minimum_size.y = row_height * mini(urls.size(), 2)
 	var desc := _l(MODE_DESC[mode], 12, DIM)
 	desc.autowrap_mode = TextServer.AUTOWRAP_ARBITRARY
 	lobby_box.add_child(desc)
+	var occupants := {}
 	for p in m.players:
-		var id := int(p.id)
-		var seat: int = mine.find(id)
-		var tags := ""
-		if id == int(m.get("hostId", 0)):
-			tags += "房主　"
-		if bool(p.bot):
-			tags += "电脑　"
-		elif seat == 0:
-			tags += "你 · %s放钩　" % Cfg.KEYSETS[0].label
-		elif seat > 0:
-			tags += "本机 · %s放钩　" % Cfg.KEYSETS[seat].label
-		var row := [_dot(Cfg.COLORS[int(p.c) % 4]), _l(String(p.name), 12, Cfg.COLORS[int(p.c) % 4]), _l(tags, 12, DIM)]
-		if not bool(p.on):
-			row.append(_l("掉线", 12, BAD))
-		row.append(_spacer())
-		if seat > 0 or (host and seat < 0):
-			row.append(_b("请出", func(): Net.send({"t": "kick", "id": id}), "kick_%d" % id, "Small"))
-		lobby_box.add_child(_hbox(row))
+		occupants[int(p.c)] = p
+	var portraits := _hbox([])
+	for c in Cfg.b().CHARACTERS.size():
+		portraits.add_child(_lobby_role_card(c, occupants.get(c, {}), mine, int(m.hostId), host))
+	lobby_box.add_child(portraits)
+	if mine.size() > 1:
+		var seats := _hbox([_l("为本机座位选角", 12, GOLD)])
+		for i in mine.size():
+			var id := int(mine[i])
+			var b := _b("%d号 · %s" % [i + 1, Cfg.KEYSETS[i].label], _pick_lobby_seat.bind(id), "pick_seat_%d" % i, "Small")
+			b.disabled = lobby_pick_id == id
+			b.tooltip_text = cl.pname(id)
+			seats.add_child(b)
+		lobby_box.add_child(seats)
 	lobby_box.add_child(_spacer_v())
 	lobby_box.add_child(Divider.new())
 	if host:
@@ -537,6 +590,55 @@ func _fill_lobby() -> void:
 		btns.append(_spacer())
 		btns.append(_l("等房主开始…", 12, DIM))
 	lobby_box.add_child(_hbox(btns))
+
+
+func _pick_lobby_seat(id: int) -> void:
+	lobby_pick_id = id
+	_fill_lobby()
+
+
+func _lobby_role_card(c: int, p: Dictionary, mine: Array, host_id: int, host: bool) -> VBoxContainer:
+	var card := VBoxContainer.new()
+	card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	card.add_theme_constant_override("separation", 1)
+	var id := int(p.get("id", 0))
+	var bot := bool(p.get("bot", false))
+	var seat := mine.find(id)
+	var selected := id != 0 and id == lobby_pick_id
+	var portrait := _portrait(c, 40, func(): Net.send({"t": "pick", "i": lobby_pick_id, "c": c}), "pick_role_%d" % c)
+	portrait.disabled = id != 0 and not bot
+	portrait.add_theme_color_override("icon_disabled_color", Color.WHITE)
+	if selected:
+		portrait.add_theme_stylebox_override("disabled", _box(Color(0.3, 0.21, 0.1, 0.94), Cfg.COLORS[c], 5, 1, GOLD, 3))
+	elif id != 0:
+		portrait.modulate = Color(1, 1, 1, 0.55)
+	card.add_child(portrait)
+	var role := Cfg.character(c)
+	var role_name := _l(String(role.n), 12, Cfg.COLORS[c])
+	role_name.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	card.add_child(role_name)
+	var skill := _l(String(role.d), 11, CREAM)
+	skill.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	card.add_child(skill)
+	var occupant := "可选择" if id == 0 else String(p.name)
+	if bot:
+		portrait.tooltip_text += "\n电脑 %s 会让位" % occupant
+		occupant += " · 可让位"
+	elif seat >= 0:
+		portrait.tooltip_text += "\n%s · %s放钩" % [occupant, Cfg.KEYSETS[seat].label]
+	elif id != 0:
+		portrait.tooltip_text += "\n%s 已选" % occupant
+	if id == host_id:
+		portrait.tooltip_text += " · 房主"
+	var player := _l(occupant, 11, GOLD if selected else DIM)
+	player.tooltip_text = occupant
+	player.mouse_filter = Control.MOUSE_FILTER_PASS
+	player.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	player.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	card.add_child(player)
+	if id != 0 and (seat > 0 or (host and seat < 0)):
+		card.add_child(_b("请出", func(): Net.send({"t": "kick", "id": id}), "kick_%d" % id, "Small"))
+	return card
 
 
 # ───── 对局中：道具栏、倒计时、井上的字 ─────
@@ -1148,6 +1250,11 @@ func _make_card(k: String, x: float, index: int) -> Dictionary:
 	price.size = Vector2(126, 14)
 	price.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	card.add_child(price)
+	var discount := _l("9折", 10, GOLD)
+	_outline(discount)
+	discount.position = Vector2(60, 117)
+	discount.hide()
+	card.add_child(discount)
 	var hit := Button.new()                       # 看不见的按钮，盖住整件货，接住指到和点击
 	hit.flat = true
 	hit.focus_mode = Control.FOCUS_NONE
@@ -1160,7 +1267,7 @@ func _make_card(k: String, x: float, index: int) -> Dictionary:
 	card.add_child(hit)
 	reg["item_" + k] = hit
 	shop_items.add_child(card)
-	return {"card": card, "icon": icon, "halo": halo, "name": name_l, "tag": tag, "price": price, "born": _t + index * 0.07, "scale": 0.0}
+	return {"card": card, "icon": icon, "halo": halo, "name": name_l, "tag": tag, "price": price, "discount": discount, "born": _t + index * 0.07, "scale": 0.0}
 
 
 func _fill_shop() -> void:
@@ -1186,7 +1293,9 @@ func _fill_shop() -> void:
 			_cards[keys[i]] = _make_card(keys[i], x0 + SHOP_CARD_WIDTH * i, i)
 		_shop_sel = ""
 		_shop_hover = ""
-	var sig := JSON.stringify([pid, ids, c.pr, c.sale, p.get("ak", {}), p.m, p.tl, p.nx, p.r, int(p.out), _shop_sel, _shop_hover, c.get("ng", 0)])
+	var c_role: int = cl.pcharacter(pid)
+	var discounted := Cfg.character(c_role).has("priceMul")
+	var sig := JSON.stringify([pid, ids, c_role, c.pr, c.sale, p.get("ak", {}), p.m, p.tl, p.nx, p.r, int(p.out), _shop_sel, _shop_hover, c.get("ng", 0)])
 	if _sig.get("shop", "") != sig:
 		_sig["shop"] = sig
 		_clear(shop_seats)
@@ -1213,7 +1322,11 @@ func _fill_shop() -> void:
 			var listp := int(c.pr[k])
 			var ask := int(p.ak.get(k, listp))
 			var owned: bool = (not def.has("tool") and p.get("nx", {}).has(k)) or (def.has("tool") and int(p.tl.get(k, 0)) >= int(b.RULES.toolMax))
-			cd.price.text = "已买" if (owned and not def.has("tool")) else (Cfg.money(ask) + ("（原 %s）" % Cfg.money(listp) if ask < listp else ""))
+			var sold: bool = owned and not def.has("tool")
+			cd.price.text = "已买" if sold else Cfg.money(ask)
+			if not sold and not discounted and ask < listp:
+				cd.price.text += "（原 %s）" % Cfg.money(listp)
+			cd.discount.visible = discounted and not sold
 			cd.tag.text = "特价" if k == String(c.sale) else ""
 			cd.name.add_theme_color_override("font_color", GOLD if k == _shop_sel else CREAM)
 			cd.icon.modulate = Color(0.45, 0.42, 0.4) if owned else Color(1, 1, 1)

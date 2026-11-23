@@ -8,7 +8,7 @@ const S := 0.5                       # 服务端坐标（原型的 1280×720）�
 enum Q { LOW, MID, HIGH }
 const Q_NAMES := ["low", "mid", "high"]
 
-# 四个玩家的颜色：红、蓝、绿、紫
+# 四个角色的颜色：红、蓝、绿、紫
 const COLORS := [Color("ff6f61"), Color("45c8f0"), Color("7be08a"), Color("b99aff")]
 
 # 物件类型 → 图片名
@@ -49,6 +49,10 @@ static func b() -> Dictionary:
 	if _b.is_empty():
 		_b = JSON.parse_string(FileAccess.get_file_as_string("res://shared/balance.json"))
 	return _b
+
+
+static func character(c: int) -> Dictionary:
+	return b().CHARACTERS[c]
 
 
 static func type_key(t) -> String:

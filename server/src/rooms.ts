@@ -1,11 +1,15 @@
 // 房间管理和消息处理：开房、进房、掉线重连、房主操作、把玩家的按键转给规则。
-import { MAXP, MODES, BOT_NAMES, RULES, SHOP } from './core.ts';
+import { MAXP, MODES, BOT_NAMES, CHARACTERS, RULES, SHOP } from './core.ts';
 import type { Room, Player, Conn, Mode } from './core.ts';
 import { newRoom, newPlayer, layout, startGame, toLobby, fire, useTool, setSoloPaused, tickRoom, snapshot } from './game.ts';
 import { buyClick, keeperAct } from './shop.ts';
 import { emote, matchLog, EVENT_KEYS } from './fun.ts';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+
+function validCharacter(c: unknown): c is number {
+  return typeof c === 'number' && Number.isInteger(c) && c >= 0 && c < CHARACTERS.length;
+}
 
 export class Hub {
   rooms = new Map<string, Room>();
@@ -24,9 +28,9 @@ export class Hub {
     this.rooms.set(code, room);
     return room;
   }
-  cleanName(name: unknown, room: Room): string {
+  cleanName(name: unknown, room: Room, character?: number): string {
     const s = String(name == null ? '' : name).replace(/\s+/g, ' ').trim().slice(0, 10);
-    return s || '矿工' + (room.players.length + 1);
+    return s || (character === undefined ? '矿工' + (room.players.length + 1) : CHARACTERS[character].n);
   }
   // 房间名单（谁在、谁是房主、哪些座位是你的）。每条连接看到的"你"不一样，所以逐个发
   sendMeta(room: Room): void {
@@ -39,7 +43,7 @@ export class Hub {
       });
     }
   }
-  joinRoom(conn: Conn, room: Room, name: unknown): void {
+  joinRoom(conn: Conn, room: Room, name: unknown, character?: number): void {
     const mine = room.players.filter(p => !p.bot && p.token === conn.token);
     if (mine.length) {                                       // 掉线重连：按 token 认回原来的座位
       for (const p of mine) {
@@ -49,7 +53,8 @@ export class Hub {
     } else {
       if (room.ph !== 'lobby') { conn.send({ t: 'err', gone: 1, msg: '这个房间已经开打了，等他们打完再进' }); return; }
       if (room.players.length >= MAXP) { conn.send({ t: 'err', gone: 1, msg: '房间满了，最多 4 人' }); return; }
-      newPlayer(room, conn, this.cleanName(name, room));
+      const p = newPlayer(room, conn, this.cleanName(name, room, character));
+      if (character !== undefined) p.c = character;
     }
     conn.room = room; room.conns.add(conn); room.emptyAt = 0;
     if (![...room.conns].some(c => c.token === room.host)) room.host = conn.token;
@@ -83,9 +88,13 @@ export class Hub {
     if (m.t === 'hello') { if (typeof m.token === 'string' && m.token.length >= 8) conn.token = m.token.slice(0, 40); return; }
     if (m.t === 'create') {
       if (room) return;
+      const character: unknown = m.mode === 'solo' ? m.c : undefined;
+      if (character !== undefined && !validCharacter(character)) {
+        conn.send({ t: 'err', msg: '角色编号无效' }); return;
+      }
       if (this.rooms.size >= RULES.maxRooms) { conn.send({ t: 'err', msg: '房间太多了，稍后再试' }); return; }
       const r = this.mkRoom(); r.host = conn.token; if (MODES.includes(m.mode)) r.mode = m.mode as Mode;
-      this.joinRoom(conn, r, m.name);
+      this.joinRoom(conn, r, m.name, character);
       if (r.mode === 'solo') { startGame(r); this.broadcast(r); }
       return;
     }
@@ -124,6 +133,17 @@ export class Hub {
       case 'addLocal':                                       // 同一台设备上再加一个人，共用这条连接
         if (room.ph !== 'lobby' || room.players.length >= MAXP) break;
         newPlayer(room, conn, '玩家' + (room.players.length + 1)); this.sendMeta(room); break;
+      case 'pick': {
+        const p = own(m.i);
+        if (room.ph !== 'lobby' || !p) break;
+        if (!validCharacter(m.c)) { conn.send({ t: 'err', msg: '角色编号无效' }); break; }
+        if (p.c === m.c) break;
+        const occupied = room.players.find(q => q.c === m.c);
+        if (occupied && !occupied.bot) { conn.send({ t: 'err', msg: '这个角色已有玩家选择' }); break; }
+        if (occupied) occupied.c = p.c;                      // 电脑接手真人腾出的角色，满员时也能换
+        p.c = m.c;
+        this.sendMeta(room); room.dirty = true; break;
+      }
       case 'kick': {
         if (room.ph !== 'lobby') break;
         const p = room.players.find(q => q.id === m.id); if (!p) break;

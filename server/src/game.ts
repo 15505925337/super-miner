@@ -2,7 +2,7 @@
 // 规则和数值照原型 deep-mine.js，这里只管算，不碰网络。
 import {
   W, H, Y0, MINL, AMP, SWING, EXT_V, RET_V, HAUL_V, HOOK_R, BOOM_R, ROUND_T, COUNT_T, REND_T, STRONG, HELP,
-  SW, EXT, HAUL, RET, AST, TYPES, TI, SHOP, TOOL_ORDER, RULES, BAG, FUN,
+  SW, EXT, HAUL, RET, AST, TYPES, TI, SHOP, TOOL_ORDER, CHARACTERS, RULES, BAG, FUN,
   wallet, strong, ev, depthOf, tierOf, goalOf,
 } from './core.ts';
 import type { Room, Player, Field, Item, Conn, Mode } from './core.ts';
@@ -98,7 +98,7 @@ export function genItems(room: Room, n: number): Item[] {
         if (y + T.r > H - 96 && (k === 'bug' || Math.abs(x - W / 2) < 115 + T.r)) continue;
         if (!items.every(o => Math.hypot(o.x - x, o.y - y) > o.r + T.r + 14)) continue;
         const it: Item = { id: room.nextItem++, t, x, y, r: T.r, v: T.v, w: T.w, by: 0, vx: 0, x0: 0, x1: 0, hx: x, hy: y };
-        if (k === 'bag') { it.w = BAG.weightMin + rnd() * BAG.weightSpan; it.roll = rnd(); it.roll2 = rnd(); }   // 开出什么先定好，分屏每人一样
+        if (k === 'bag') { it.w = BAG.weightMin + rnd() * BAG.weightSpan; it.roll = rnd(); it.roll2 = rnd(); }   // 分屏共用生成时的随机数
         if (k === 'bug') { it.vx = (rnd() < 0.5 ? -1 : 1) * ri(55, 95); it.x0 = Math.max(40, x - 170); it.x1 = Math.min(W - 40, x + 170); }
         items.push(it); break;
       }
@@ -161,10 +161,14 @@ export function explode(room: Room, f: Field, it: Item, playerId?: number): void
   }
 }
 export function openBag(room: Room, p: Player, it: Item): { v: number; s?: string } {
-  const r = it.roll ?? 0, r2 = it.roll2 ?? 0, tools = TOOL_ORDER[room.mode];
+  let r = it.roll ?? 0;
+  const r2 = it.roll2 ?? 0, tools = TOOL_ORDER[room.mode];
   const rnd = (a: number, b: number) => Math.round((a + r2 * (b - a)) / 10) * 10;
   const giveTool = () => { const k = tools[Math.floor(r2 * tools.length)]; p.tools[k] = Math.min(RULES.toolMax, p.tools[k] + 1); return SHOP[k].n + ' ×1'; };
   if (p.buff.clover) return r < BAG.clover.moneyChance ? { v: rnd(BAG.clover.moneyMin, BAG.clover.moneyMax) } : { v: BAG.clover.elseMoney, s: giveTool() };
+  const good = BAG.strongBelow, boosted = Math.min(1, good * (CHARACTERS[p.c].bagMul ?? 1));
+  // 只把新增的好运区间按原比例映射到钱、道具和大力，原本的好结果照旧。
+  if (r >= good && r < boosted) r = (r - good) / (boosted - good) * good;
   if (r < BAG.moneyBelow) return { v: rnd(BAG.moneyMin, BAG.moneyMax) };
   if (r < BAG.toolBelow) return { v: 0, s: giveTool() };
   if (r < BAG.strongBelow) { p.strongR = true; return { v: 0, s: '大力！' }; }
@@ -231,13 +235,20 @@ export function useTool(room: Room, p: Player, k: string): void {
   p.tools[k]--;
   p.stats.tools[k] = (p.stats.tools[k] || 0) + 1;
 }
+function haulSpeed(p: Player, weight: number, helpers = 0): number {
+  const character = CHARACTERS[p.c];
+  const heavy = weight >= (character.heavyMin ?? Infinity) ? character.heavyMul ?? 1 : 1;
+  return HAUL_V / weight * (strong(p) ? STRONG : 1) * (1 + HELP * helpers) * heavy;
+}
+
 export function stepPlayer(room: Room, p: Player, dt: number): void {
   if (p.out || p.frozen > room.now) return;
   const f = p.f!;
   if (p.st === SW) { p.phase += SWING * dt; p.ang = AMP * Math.sin(p.phase); return; }
   if (p.st === EXT) {
+    const speed = EXT_V * (CHARACTERS[p.c].emptyHookMul ?? 1);
     for (let s = 0; s < 2; s++) {                            // 一帧走两小步，免得钩尖穿过小东西
-      p.len += EXT_V * dt / 2;
+      p.len += speed * dt / 2;
       const tx = p.x + Math.sin(p.ang) * p.len, ty = Y0 + Math.cos(p.ang) * p.len;
       if (tx < 6 || tx > W - 6 || ty > H - 6) { p.st = RET; p.stats.miss++; p.combo = 0; ev(room, { e: 'miss', p: p.id }); return; }
       const it = f.items.find(o => Math.hypot(o.x - tx, o.y - ty) < o.r + HOOK_R);
@@ -264,14 +275,14 @@ export function stepPlayer(room: Room, p: Player, dt: number): void {
       return;
     }
     p.hold = 0;
-    p.len -= HAUL_V / it.w * (strong(p) ? STRONG : 1) * (1 + HELP * helpers) * dt;
+    p.len -= haulSpeed(p, it.w, helpers) * dt;
     const d = Math.max(MINL, p.len) + it.r * RULES.itemGrabDepth;
     it.x = p.x + Math.sin(p.ang) * d; it.y = Y0 + Math.cos(p.ang) * d;
     if (p.len <= MINL) collect(room, p, it);
     return;
   }
   if (p.st === RET) {
-    p.len -= RET_V * dt;
+    p.len -= RET_V * (CHARACTERS[p.c].emptyHookMul ?? 1) * dt;
     p.ang += (AMP * Math.sin(p.phase) - p.ang) * Math.min(1, dt * 8);
     if (p.len <= MINL) { p.len = MINL; p.st = SW; p.botCd = 0.7 + room.rnd() * 1.1; }
     return;
@@ -316,7 +327,7 @@ export function botThink(room: Room, p: Player, dt: number): void {
   if (k === 'tnt') return;
   const junk = k === 'rs' || k === 'rl';
   if (junk && items.some(o => !o.by && o.t !== TI.tnt && o.t !== TI.rs && o.t !== TI.rl)) return;
-  const haulTime = ft / (HAUL_V / first.w * (strong(p) ? STRONG : 1));
+  const haulTime = ft / haulSpeed(p, first.w);
   if (first.by) { fire(room, p); p.botErr = (room.rnd() - 0.5) * 0.16; return; }   // 去帮忙：对准了就出手
   if (haulTime > room.tl + 0.5) return;                      // 来不及拉上来就不出手
   if (room.rnd() < 0.15) { fire(room, p); p.botErr = (room.rnd() - 0.5) * 0.16; }
@@ -371,7 +382,7 @@ export function snapshot(room: Room): Record<string, any> {
   const co = room.mode === 'co', live = room.ph === 'count' || room.ph === 'play';
   const P = room.players.map(p => {
     const q: Record<string, any> = {
-      i: p.id, a: +p.ang.toFixed(3), l: +p.len.toFixed(1), s: p.st, it: p.item, m: co ? room.money : p.money, e: p.earned,
+      i: p.id, c: p.c, a: +p.ang.toFixed(3), l: +p.len.toFixed(1), s: p.st, it: p.item, m: co ? room.money : p.money, e: p.earned,
       fz: p.frozen > room.now ? 1 : 0, sg: strong(p) ? 1 : 0, tl: p.tools, nx: p.next, r: p.ready ? 1 : 0,
       x: p.x, fi: p.f ? p.f.i : 0, out: p.out ? 1 : 0, ps: p.passed || 0,
     };

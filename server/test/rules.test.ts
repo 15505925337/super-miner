@@ -168,6 +168,7 @@ test('爆炸事件：撞桶只标记出钩的玩家，连环炸没有触发者',
 
 test('宝袋：开出什么由生成时定好的两个数决定', () => {
   const { room, ps: [p] } = playing('vs', 1);
+  p.c = 1;                                                 // 用普通宝袋概率验证原始档位
   const bag = (roll: number, roll2: number) => openBag(room, p, { id: 0, t: TI.bag, x: 0, y: 0, r: 19, v: 0, w: 2, by: 0, vx: 0, x0: 0, x1: 0, roll, roll2 });
   assert.deepEqual(bag(0.3, 0.5), { v: 260 });               // 60 + 0.5×390 = 255 → 取整到 10
   assert.deepEqual(bag(0.0, 0.0), { v: 60 }); assert.deepEqual(bag(0.54, 0.999), { v: 450 });

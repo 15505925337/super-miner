@@ -218,6 +218,10 @@ func set_view(items: Array, players: Array, info: Dictionary) -> void:
 		var id := int(p.id)
 		seen[id] = true
 		var m: Dictionary = _miners.get(id, {})
+		if not m.is_empty() and int(m.c) != int(p.c):
+			m.root.queue_free()
+			m.hook.queue_free()
+			m = {}
 		if m.is_empty():
 			m = _make_miner(int(p.c))
 			_miners[id] = m
@@ -265,7 +269,7 @@ func _make_miner(c: int) -> Dictionary:
 	root.add_child(ice)
 	var hook: Node2D = HOOK.instantiate()
 	miners_root.add_child(hook)
-	var m := {"root": root, "sprite": sprite, "hook": hook, "frames": frames, "ice": ice}
+	var m := {"c": c, "root": root, "sprite": sprite, "hook": hook, "frames": frames, "ice": ice}
 	_set_miner_dark(m, _dark)
 	return m
 

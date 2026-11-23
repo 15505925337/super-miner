@@ -8,6 +8,13 @@
   "ROUND_T": 60, "COUNT_T": 3, "REND_T": 6, "SHOP_T": 45, "MAXP": 4,
   "STRONG": 1.6, "HELP": 0.9,
 
+  "CHARACTERS": [
+    { "n": "愣头青", "d": "宝袋好运 +15%", "bagMul": 1.15 },
+    { "n": "老把式", "d": "拖重物快 10%", "heavyMin": 3, "heavyMul": 1.1 },
+    { "n": "女机械师", "d": "出钩、空收快 8%", "emptyHookMul": 1.08 },
+    { "n": "老学究", "d": "商店 9 折，好还价", "priceMul": 0.9, "moodLossMul": 0.8 }
+  ],
+
   "TYPES": [
     { "k": "gs",  "n": "小金块",   "r": 15, "v": 50,   "w": 1.5 },
     { "k": "gm",  "n": "金块",     "r": 25, "v": 150,  "w": 2.7 },

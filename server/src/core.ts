@@ -18,6 +18,10 @@ export const SW = 0, EXT = 1, HAUL = 2, RET = 3, AST = 4;
 
 export interface ItemType { k: string; n: string; r: number; v: number; w: number }
 export interface ShopDef { n: string; price: number; tool?: number; only?: string[]; d: string }
+interface Character {
+  n: string;
+  bagMul?: number; heavyMin?: number; heavyMul?: number; emptyHookMul?: number; priceMul?: number; moodLossMul?: number;
+}
 export type Mode = 'co' | 'vs' | 'race' | 'solo';
 export type Phase = 'lobby' | 'count' | 'play' | 'rend' | 'shop' | 'over';
 
@@ -29,12 +33,13 @@ export const MODES: Mode[] = B.MODES;
 export const TOOL_ORDER: Record<Mode, string[]> = B.TOOL_ORDER;
 export const LAYERS: string[] = B.LAYERS;
 export const BOT_NAMES: string[] = B.BOT_NAMES;
+export const CHARACTERS: Character[] = B.CHARACTERS;
 
 export interface Item {
   id: number; t: number; x: number; y: number; r: number; v: number; w: number;
   by: number;                       // 正在拉它的玩家 id，0 表示没人拉
   vx: number; x0: number; x1: number;   // 会跑的晶甲虫：速度和来回的范围
-  roll?: number; roll2?: number;    // 宝袋开出什么，生成时就定好（分屏每人一样）
+  roll?: number; roll2?: number;    // 分屏共用预生成的宝袋随机数，开袋时按角色和道具解读
   hx?: number; hy?: number;         // 原来的位置（宝箱没钥匙打不开时掉回这里）
 }
 export interface Field { i: number; items: Item[]; booms: { id: number; at: number }[] }
@@ -51,7 +56,7 @@ export interface RoundEvent { k: string; st: number; at: number; until: number }
 export interface Conn { token: string; room: Room | null; send(o: unknown): void; close(): void }
 
 export interface Player {
-  id: number; name: string; c: number; bot: boolean; conn: Conn | null; token: string | null;
+  id: number; name: string; c: number; bot: boolean; conn: Conn | null; token: string | null;  // c 同时决定角色和颜色
   money: number; earned: number; total: number;
   x: number; phase: number; ang: number; len: number; st: number; item: number; frozen: number; strongR: boolean;
   tools: Record<string, number>; buff: Record<string, number>; next: Record<string, number>;

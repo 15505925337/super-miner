@@ -30,6 +30,7 @@ var hitstop_until := 0.0         # 顿帧：在这个时刻（毫秒）之前画
 var _tab_hidden := false
 var _visibility_callback: JavaScriptObject
 var _solo_best := {"round": 0, "total": 0}
+var solo_character := 0
 var _tick_s := -1                # 最后几秒的滴答声响到第几秒了
 
 const EMOTE_KEYS := [KEY_Z, KEY_X, KEY_C, KEY_V, KEY_B, KEY_N]
@@ -53,6 +54,11 @@ func _ready() -> void:
 	Net.got_left.connect(_on_left)
 	Net.link_changed.connect(func(_up): changed.emit())
 	if OS.has_feature("web"):
+		var saved = JavaScriptBridge.eval("(function(){try{return localStorage.getItem('dj_solo_character')}catch(e){return null}})()", true)
+		if saved is String and saved.is_valid_int():
+			var c := int(saved)
+			if c >= 0 and c < Cfg.b().CHARACTERS.size():
+				solo_character = c
 		var document := JavaScriptBridge.get_interface("document")
 		_visibility_callback = JavaScriptBridge.create_callback(_on_visibility_changed)
 		document.addEventListener("visibilitychange", _visibility_callback)
@@ -108,6 +114,12 @@ func again_solo() -> void:
 		Net.send({"t": "again"})
 
 
+func set_solo_character(c: int) -> void:
+	solo_character = c
+	if OS.has_feature("web"):
+		JavaScriptBridge.eval("try{localStorage.setItem('dj_solo_character', '%d')}catch(e){}" % c, true)
+
+
 func update_solo_record(round_no: int, total: int) -> Dictionary:
 	var web := OS.has_feature("web")
 	if web:
@@ -157,7 +169,12 @@ func pname(id: int) -> String:
 
 
 func pcolor(id: int) -> Color:
-	return Cfg.COLORS[int(pmeta(id).get("c", 0)) % 4]
+	return Cfg.COLORS[pcharacter(id)]
+
+
+func pcharacter(id: int) -> int:
+	var c := int(pmeta(id).get("c", 0))
+	return c if ph() == "lobby" else int(pstate(id).get("c", c))
 
 
 func pstate(id: int) -> Dictionary:
@@ -385,7 +402,9 @@ func _haul_speed(c: Dictionary, p: Dictionary, weight: float) -> float:
 		if dt > 0.0:
 			return maxf(0.0, (float(p.l) - float(c.l)) / dt)
 	var b := Cfg.b()
-	return float(b.HAUL_V) / weight * (float(b.STRONG) if int(c.sg) == 1 else 1.0)
+	var role := Cfg.character(pcharacter(int(c.i)))
+	var heavy := float(role.get("heavyMul", 1.0)) if weight >= float(role.get("heavyMin", INF)) else 1.0
+	return float(b.HAUL_V) / weight * (float(b.STRONG) if int(c.sg) == 1 else 1.0) * heavy
 
 
 func _miner_frame(o: Dictionary, c: Dictionary, p: Dictionary, now: float, paused: bool) -> String:
@@ -402,7 +421,7 @@ func _miner_frame(o: Dictionary, c: Dictionary, p: Dictionary, now: float, pause
 		frame = "idle2" if floori(now / 1000.0 + int(o.c) * 0.5) % 2 == 1 else "idle"
 	elif st == 3:
 		motion = "crank"
-		fps = 12.0
+		fps = 12.0 * float(Cfg.character(int(o.c)).get("emptyHookMul", 1.0))
 	elif st == 2 or st == 4:
 		var items: Dictionary = cur.fm[int(o.fi)] if cur.has("fm") and int(o.fi) < cur.fm.size() else {}
 		var it: Array = items.get(int(c.it), [])
@@ -438,7 +457,10 @@ func _miner_frame(o: Dictionary, c: Dictionary, p: Dictionary, now: float, pause
 func create(mode_key: String, player_name: String) -> void:
 	if mode_key != "solo" or not player_name.strip_edges().is_empty():
 		Net.save_name(player_name)
-	Net.send({"t": "create", "name": player_name, "mode": mode_key})
+	var msg := {"t": "create", "name": player_name, "mode": mode_key}
+	if mode_key == "solo":
+		msg["c"] = solo_character
+	Net.send(msg)
 
 
 func join(code: String, player_name: String) -> void:
@@ -629,7 +651,7 @@ func build_view() -> Dictionary:
 		var id := int(mp.id)
 		var seat := seat_of(id)
 		var o := {
-			"id": id, "name": String(mp.name), "c": int(mp.c), "x": roundf(float(b.W) * (idx + 1) / (n + 1)), "fi": 0, "out": 0, "ps": 0,
+			"id": id, "name": String(mp.name), "c": pcharacter(id), "x": roundf(float(b.W) * (idx + 1) / (n + 1)), "fi": 0, "out": 0, "ps": 0,
 			"ang": float(b.AMP) * sin(_t * float(b.SWING) * 0.55 + idx * 1.7), "len": float(b.MINL), "st": 0, "fz": 0, "sg": 0, "seat": seat, "tag": "", "hint": "", "m": 0, "frame": "idle", "on": bool(mp.get("on", true)),
 		}
 		var c: Dictionary = pstate(id)
@@ -652,7 +674,8 @@ func build_view() -> Dictionary:
 				if _pred.has(id):
 					var pr: Dictionary = _pred[id]
 					var el: float = (now - float(pr.t)) / 1000.0
-					var want: float = float(b.MINL) + float(b.EXT_V) * el
+					var speed := float(b.EXT_V) * float(Cfg.character(int(o.c)).get("emptyHookMul", 1.0))
+					var want := float(b.MINL) + speed * el
 					if o.st == 0 and el < 0.3:
 						o.st = 1
 						o.ang = float(pr.ang)

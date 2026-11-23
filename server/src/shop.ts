@@ -3,7 +3,7 @@
 //   脑子（ruleBrain）只管两件事：老板这句话怎么说、这一手是答应 / 还价 / 拒绝。
 // 这一期只有规则版的脑子。以后接模型，只换脑子，keeperApply 的兜底不变：
 // 成交价不会低于底价，还价被夹在 [底价, 当前要价] 之间，耐心一次最多涨 15、掉 30。
-import { SHOP, SHOP_T, KEEPER, RULES, clamp, round10, pick, wallet } from './core.ts';
+import { SHOP, SHOP_T, KEEPER, RULES, CHARACTERS, clamp, round10, pick, wallet } from './core.ts';
 import type { Room, Player } from './core.ts';
 
 export interface KeeperCtx {
@@ -13,6 +13,16 @@ export interface KeeperCtx {
   offer: number | null; text: string | null;
 }
 export interface KeeperReply { say?: string; action?: string; price?: number; mood?: number }
+
+function seatPrice(p: Player, price: number): number {
+  return Math.round(price * (CHARACTERS[p.c].priceMul ?? 1));
+}
+
+function counterPrice(price: number, offer: number, floor: number, ask: number): number {
+  const min = Math.max(floor, offer);
+  if (price <= min || price >= ask) return clamp(price, min, ask);
+  return clamp(round10(price), min, ask);
+}
 
 // 开店。每次只上架一部分货（数量在 stockMin 到 stockMax 之间随机），不是每回都什么都卖；stockAlways 里的（炸药）每次都有。
 // stock：指定上架哪几件（测试用）；不传就随机挑
@@ -37,8 +47,8 @@ export function openShop(room: Room, stock?: string[]): void {
   for (const p of room.players) {
     p.ready = false; p.mood = KEEPER.moodMin + Math.floor(room.rnd() * KEEPER.moodSpan);
     p.moodUp = 0; p.flat = 0; p.kn = 0; p.kAt = 0; p.ksay = ''; p.ka = 'idle';
-    p.deal = {};                                             // 标价、底价大家一样，谈下来的要价各算各的
-    for (const k of keys) p.deal[k] = { ask: room.list[k], tries: 0 };
+    p.deal = {};                                             // 按角色从货架价算初始要价，之后各谈各的
+    for (const k of keys) p.deal[k] = { ask: seatPrice(p, room.list[k]), tries: 0 };
     if (p.out) continue;
     if (!p.bot) keeperAct(room, p, 'greet');
     else if (room.mode !== 'co') {                           // 电脑不讲价，只在对战里花自己的钱
@@ -72,7 +82,7 @@ export function buyClick(room: Room, p: Player, k: string): boolean {
   if (!buy(room, p, k)) return false;
   const price = p.deal[k].ask;
   p.ksay = pick(['拿好。', '好嘞，收你 ¥' + price + '。', '识货。'], room.rnd);
-  p.ka = saleFace(price, room.floor[k], room.list[k]); p.kn++;
+  p.ka = saleFace(price, seatPrice(p, room.floor[k]), seatPrice(p, room.list[k])); p.kn++;
   return true;
 }
 
@@ -88,7 +98,7 @@ export function ruleBrain(c: KeeperCtx, rnd: () => number): KeeperReply {
     if (o >= it.floor && (it.tries >= 2 || o >= it.ask * KEEPER.quickAcceptAtAsk || rnd() * 100 < c.mood - 30)) {
       return { say: pick(['唉，行吧行吧，¥' + o + ' 拿走。', '看你顺眼，¥' + o + ' 给你了。'], rnd), action: 'accept', mood: -4 };
     }
-    const price = Math.max(it.floor, round10((o + it.ask) / 2));
+    const price = counterPrice((o + it.ask) / 2, o, it.floor, it.ask);
     return { say: pick(['¥' + o + ' 太低了，¥' + price + ' 怎么样？', '各让一步，¥' + price + '。', '最多让到 ¥' + price + '。'], rnd), action: 'counter', price, mood: o < it.floor ? -12 : -5 };
   }
   const t = c.text || '';
@@ -125,7 +135,7 @@ export function keeperAct(room: Room, p: Player, kind: 'greet' | 'offer' | 'chat
   const ctx: KeeperCtx = {
     kind, mode: room.mode, round: room.round, mood: p.mood, flattered: p.flat || 0, sale: SHOP[room.sale].n,
     player: { name: p.name, money: wallet(room, p).money },
-    item: d ? { key: k!, name: SHOP[k!].n, list: room.list[k!], ask: d.ask, floor: room.floor[k!], tries: d.tries } : null,
+    item: d ? { key: k!, name: SHOP[k!].n, list: seatPrice(p, room.list[k!]), ask: d.ask, floor: seatPrice(p, room.floor[k!]), tries: d.tries } : null,
     offer: kind === 'offer' ? offer : null, text: text || null,
   };
   keeperApply(room, p, ctx, brain(ctx, room.rnd) || {});
@@ -135,6 +145,7 @@ export function keeperAct(room: Room, p: Player, kind: 'greet' | 'offer' | 'chat
 export function keeperApply(room: Room, p: Player, ctx: KeeperCtx, r: KeeperReply): void {
   let say = String(r.say || '……').slice(0, KEEPER.sayMax);
   let dm = clamp(Math.round(Number(r.mood) || 0), KEEPER.moodStepMin, KEEPER.moodStepMax);
+  if (ctx.kind === 'offer' && dm < 0) dm = -Math.round(-dm * (CHARACTERS[p.c].moodLossMul ?? 1));
   if (dm > 0) {                                              // 一次逛店最多哄高 25
     dm = Math.min(dm, KEEPER.moodUpCap - p.moodUp); p.moodUp += dm;
     if (ctx.kind === 'chat') p.flat = (p.flat || 0) + 1;
@@ -142,16 +153,16 @@ export function keeperApply(room: Room, p: Player, ctx: KeeperCtx, r: KeeperRepl
   p.mood = clamp(p.mood + dm, 0, 100);
   let reaction = dm <= -12 ? (ctx.kind === 'offer' ? 'surprised' : 'angry') : dm > 0 && ctx.kind !== 'greet' ? 'happy' : 'idle';
   if (ctx.kind === 'offer' && ctx.item && ctx.offer != null) {
-    const k = ctx.item.key, d = p.deal[k], floor = room.floor[k];
+    const k = ctx.item.key, d = p.deal[k], floor = seatPrice(p, room.floor[k]);
     if (ctx.offer >= d.ask || (r.action === 'accept' && ctx.offer >= floor)) {
       d.ask = Math.min(d.ask, ctx.offer);
-      if (buy(room, p, k)) reaction = saleFace(d.ask, floor, room.list[k]);
+      if (buy(room, p, k)) reaction = saleFace(d.ask, floor, seatPrice(p, room.list[k]));
       else say = '价是谈好了，可你这会儿买不了（钱不够，或者已经有了）。';
     } else if (r.action === 'accept') {                      // 脑子想低于底价卖：不行，改成还到底价
       d.ask = Math.min(d.ask, floor); say = '这个数真不行，最低 ¥' + d.ask + '。';
       reaction = 'sigh';
     } else if (r.action === 'counter') {
-      d.ask = round10(clamp(Number(r.price) || d.ask, Math.max(floor, ctx.offer), d.ask));
+      d.ask = counterPrice(Number(r.price) || d.ask, ctx.offer, floor, d.ask);
       if (d.ask === floor) reaction = 'sigh';
       else if (reaction !== 'surprised') reaction = 'think';
     } else if (r.action === 'refuse' && (p.mood === 0 || reaction !== 'surprised')) {
