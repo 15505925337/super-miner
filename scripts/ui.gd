@@ -35,6 +35,7 @@ var _toast_t := 0.0
 var _shop_sel := ""              # 商店里选中准备还价的商品
 var _face := ""
 var _t := 0.0
+var _draw_area := Rect2(0, 0, Cfg.GW, Cfg.GH)
 
 var home: Control
 var home_bg: Sprite2D
@@ -430,6 +431,7 @@ func _screen_bg(texture: Texture2D) -> Sprite2D:
 
 
 func set_draw_area(area: Rect2) -> void:
+	_draw_area = area
 	for bg in [home_bg, shop_bg]:
 		bg.position = area.position
 		bg.region_rect = Rect2(area.position * 3.0, area.size * 3.0)
@@ -596,7 +598,7 @@ func _toggle_mute(flip: bool = true) -> void:
 
 
 # huds 里每一项是一口井：{origin 井的左上角, scale 井相对 640×360 的缩放, plate, plank, clock, veil, players}
-func draw_hud(huds: Array) -> void:
+func draw_hud(huds: Array, split: bool) -> void:
 	_hud_n = 0
 	_veil_n = 0
 	_band_n = 0
@@ -609,7 +611,11 @@ func draw_hud(huds: Array) -> void:
 		else:
 			var fs := maxi(8, roundi(12 * sc))
 			if String(h.plate) != "" or String(h.plank) != "":   # 顶上一条往下淡出的暗带，字压在上面才清楚
-				_band(o, Vector2(Cfg.GW, 26) * sc)
+				var band := Rect2(o, Vector2(Cfg.GW, 26) * sc)
+				if not split:
+					band.position.x = _draw_area.position.x
+					band.size.x = _draw_area.size.x
+				_band(band.position, band.size)
 			_hud_text(o + Vector2(8, 3) * sc, Vector2(220, 16) * sc, String(h.plate), fs, CREAM, HORIZONTAL_ALIGNMENT_LEFT)
 			_hud_text(o + Vector2(170, 3) * sc, Vector2(300, 16) * sc, String(h.plank), fs, GOLD, HORIZONTAL_ALIGNMENT_CENTER)
 			_hud_text(o + Vector2(540, 3) * sc, Vector2(92, 16) * sc, String(h.clock), fs, CREAM, HORIZONTAL_ALIGNMENT_RIGHT)

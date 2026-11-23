@@ -381,7 +381,7 @@ func _process(dt: float) -> void:
 		h.veil = ""
 		h.players = players if view.info.live else []
 		huds.append(h)
-	ui.draw_hud(huds)
+	ui.draw_hud(huds, _split)
 	# 有面板开着时，把后面的游戏画面虚化、压暗（渐入渐出）
 	_menu = move_toward(_menu, 1.0 if ui.menu_open() else 0.0, dt * 4.0)
 	final_mat.set_shader_parameter("menu", _menu if fx_on else 0.0)

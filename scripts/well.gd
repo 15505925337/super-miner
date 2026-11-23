@@ -15,6 +15,7 @@ const SHAFT := preload("res://shaders/shaft.gdshader")
 const BG_SHADER := preload("res://shaders/bg.gdshader")
 const MINER_SIZE := 64.0
 const MINER_SOURCE_SIZE := 512.0
+const WINCH_ROPE_EXIT := Vector2(256, 432)    # 四个矿工的三种姿势共用同一处绳卷出绳点
 # 矿工头灯灯芯在原图上的位置，按平时、使劲拉、拉上来的姿势排列。
 const HEAD_LAMPS := [
 	{"idle": Vector2(153, 249), "pull": Vector2(125, 253), "happy": Vector2(146, 241)},
@@ -223,6 +224,8 @@ func set_view(items: Array, players: Array, info: Dictionary) -> void:
 	seen = {}
 	var y0: float = float(Cfg.b().Y0) * Cfg.S
 	var ledge := float(conf.ledge) / 3.0
+	var sprite_center := Vector2.ONE * (MINER_SOURCE_SIZE * 0.5)
+	var source_scale := MINER_SIZE / MINER_SOURCE_SIZE
 	for p in players:
 		var id := int(p.id)
 		seen[id] = true
@@ -240,13 +243,15 @@ func set_view(items: Array, players: Array, info: Dictionary) -> void:
 		var hop := -absf(sin(float(p.get("joy", 0.0)) * PI)) * 3.5
 		m.root.position = Vector2(x, ledge - 31.8 + hop + (bob if hauling else 0.0))
 		var head_lamp: Vector2 = HEAD_LAMPS[int(p.c) % HEAD_LAMPS.size()][frame]
-		m.head.position = (head_lamp - Vector2.ONE * (MINER_SOURCE_SIZE * 0.5)) * (MINER_SIZE / MINER_SOURCE_SIZE)
+		m.head.position = (head_lamp - sprite_center) * source_scale
 		m.sprite.modulate = Color(0.75, 0.95, 1.0) if int(p.fz) == 1 else Color(1, 1, 1)
-		m.hook.position = Vector2(x, y0)
-		m.hook.apply(float(p.ang), float(p.len) * Cfg.S, hauling, int(p.fz) == 1, int(p.sg) == 1)
-		var gone: bool = int(p.get("out", 0)) == 1
-		m.root.modulate.a = 0.4 if (gone or not bool(p.get("on", true))) else 1.0
-		m.hook.visible = not gone
+		var pivot := Vector2(x, y0)
+		var winch: Vector2 = m.root.position + (WINCH_ROPE_EXIT - sprite_center) * source_scale
+		m.hook.position = pivot
+		m.hook.apply(float(p.ang), float(p.len) * Cfg.S, hauling, int(p.fz) == 1, int(p.sg) == 1, winch - pivot)
+		var inactive: bool = int(p.get("out", 0)) == 1 or not bool(p.get("on", true))
+		m.root.modulate.a = 0.4 if inactive else 1.0
+		m.hook.visible = not inactive
 	for id in _miners.keys():
 		if not seen.has(id):
 			_miners[id].root.queue_free()

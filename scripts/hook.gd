@@ -32,12 +32,13 @@ func _ready() -> void:
 
 
 # ang：偏离正下方的角度（弧度）；length：转轴到判定圆圆心的长度（游戏像素）
-func apply(ang: float, length: float, closed: bool, frozen: bool, strong: bool) -> void:
+# rope_start：绳卷出绳点相对于转轴的位置
+func apply(ang: float, length: float, closed: bool, frozen: bool, strong: bool, rope_start: Vector2) -> void:
 	var p := Vector2(sin(ang), cos(ang)) * length
 	claw.position = p
 	claw.rotation = -ang
 	var ring := p + (RING_FROM_MOUTH * claw_sprite.scale).rotated(claw.rotation)
-	var pts := PackedVector2Array([Vector2.ZERO, ring])
+	var pts := PackedVector2Array([rope_start, Vector2.ZERO, ring])
 	rope.points = pts
 	rope_edge.points = pts
 	claw_sprite.texture = TEX_CLOSED if closed else TEX_OPEN
