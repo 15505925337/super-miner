@@ -27,10 +27,12 @@ Godot 4.7（网页版是主平台，Compatibility / WebGL2）+ Node.js TypeScrip
 | `./test.sh` | 服务端测试（node --test），交付时写清"多少项、通过多少项" |
 | `./check.sh` | 服务端类型检查 |
 | `./export.sh --only` | 只导出网页版到 `build/web/`。**不要不带 `--only` 跑**，它会启动一直不退出的服务端 |
-| `tools/shot.sh <名字> <宽x高> [参数]` | 桌面版截图到 `shots/` |
-| Godot 程序 | `.tools/Godot.app/Contents/MacOS/Godot`，用 `--headless` 跑 |
+| `tools/shot.sh <名字> <宽x高> [参数]` | 桌面版截图到 `shots/`。**带窗口，只能由 Claude 在沙箱外跑，你不要跑** |
+| Godot 程序 | `.tools/Godot.app/Contents/MacOS/Godot`，**只能带 `--headless` 跑** |
 
 不要启动长期运行的服务端或浏览器联调（`server.sh`、`tools/e2e/`），这些由 Claude 验收时跑。
+
+你在沙箱里连不上窗口服务器：不带 `--headless` 的 Godot（包括 `tools/shot.sh`）一启动就崩，还会在用户屏幕上弹"Godot 意外退出"。需要看画面时在交付说明里写"未验证"，截图由 Claude 做。
 
 ## 规矩
 
