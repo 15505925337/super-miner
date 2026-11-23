@@ -82,24 +82,37 @@ test('选角色：单人开局带角色，保留自定义名，再开一局沿�
   assert.equal(solo.room!.players[0].name, '女机械师');
 });
 
-test('愣头青：同一组预生成随机数保留原来的好结果，按比例把空袋补到 100% 好结果', () => {
+test('愣头青：同一组预生成随机数保留原来的好结果，空袋概率从 10% 减到 5%', () => {
   const { room, ps: [p, q] } = playing('race', 2);
   room.rnd = () => { throw new Error('开袋不应再抽随机数'); };
   const bag = put(room, 0, 'bag', 500, 450, { roll2: 0.1 });
+  const empty = { v: BAG.emptyMoney, s: '空袋子' };
   const counts = [{ 钱: 0, 道具: 0, 大力: 0, 空袋子: 0 }, { 钱: 0, 道具: 0, 大力: 0, 空袋子: 0 }];
   for (let i = 0; i < 10000; i++) {
     const roll = (i + 0.5) / 10000;
     bag.roll = roll;
     const boosted = openBag(room, p, bag);
     const base = openBag(room, q, bag);
-    if (roll < BAG.strongBelow) assert.deepEqual(boosted, base);
+    if (roll < 0.90) {
+      assert.deepEqual(boosted, base);
+    } else {
+      assert.deepEqual(base, empty);
+      if (roll < 0.95) assert.notDeepEqual(boosted, empty);
+      else assert.deepEqual(boosted, empty);
+    }
     for (const [idx, reward] of [boosted, base].entries()) {
       const kind = reward.s === '空袋子' ? '空袋子' : reward.s === '大力！' ? '大力' : reward.s ? '道具' : '钱';
       counts[idx][kind]++;
     }
     assert.equal(bag.roll, roll);
   }
-  assert.deepEqual(counts, [{ 钱: 6111, 道具: 2222, 大力: 1667, 空袋子: 0 }, { 钱: 5500, 道具: 2000, 大力: 1500, 空袋子: 1000 }]);
+  assert.deepEqual(counts, [{ 钱: 5806, 道具: 2111, 大力: 1583, 空袋子: 500 }, { 钱: 5500, 道具: 2000, 大力: 1500, 空袋子: 1000 }]);
+  bag.roll = 0.90;
+  assert.deepEqual(openBag(room, p, bag), { v: 100 });
+  assert.deepEqual(openBag(room, q, bag), empty);
+  bag.roll = 0.95;
+  assert.deepEqual(openBag(room, p, bag), empty);
+  assert.deepEqual(openBag(room, q, bag), empty);
 });
 
 test('愣头青：幸运草照原来的比例给钱或道具，角色加成不重复叠到奖励档', () => {
@@ -109,9 +122,11 @@ test('愣头青：幸运草照原来的比例给钱或道具，角色加成不�
   bag.roll = 0.59;
   assert.deepEqual(openBag(room, p, bag), { v: 580 });
   assert.deepEqual(openBag(room, q, bag), { v: 580 });
-  bag.roll = 0.95;
-  assert.deepEqual(openBag(room, p, bag), { v: 100, s: '剪刀 ×1' });
-  assert.deepEqual(openBag(room, q, bag), { v: 100, s: '剪刀 ×1' });
+  for (const roll of [0.60, 0.90, 0.95]) {
+    bag.roll = roll;
+    assert.deepEqual(openBag(room, p, bag), { v: 100, s: '剪刀 ×1' });
+    assert.deepEqual(openBag(room, q, bag), { v: 100, s: '剪刀 ×1' });
+  }
 });
 
 test('老把式：重量达到 3 才加速，重物速度与大力饮料和合拉相乘', () => {

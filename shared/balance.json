@@ -9,7 +9,7 @@
   "STRONG": 1.6, "HELP": 0.9,
 
   "CHARACTERS": [
-    { "n": "愣头青", "d": "宝袋好运 +15%", "bagMul": 1.15 },
+    { "n": "愣头青", "d": "宝袋少一半空袋", "bagEmptyMul": 0.5 },
     { "n": "老把式", "d": "拖重物快 10%", "heavyMin": 3, "heavyMul": 1.1 },
     { "n": "女机械师", "d": "出钩、空收快 8%", "emptyHookMul": 1.08 },
     { "n": "老学究", "d": "商店 9 折，好还价", "priceMul": 0.9, "moodLossMul": 0.8 }

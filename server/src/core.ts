@@ -20,7 +20,7 @@ export interface ItemType { k: string; n: string; r: number; v: number; w: numbe
 export interface ShopDef { n: string; price: number; tool?: number; only?: string[]; d: string }
 interface Character {
   n: string;
-  bagMul?: number; heavyMin?: number; heavyMul?: number; emptyHookMul?: number; priceMul?: number; moodLossMul?: number;
+  bagEmptyMul?: number; heavyMin?: number; heavyMul?: number; emptyHookMul?: number; priceMul?: number; moodLossMul?: number;
 }
 export type Mode = 'co' | 'vs' | 'race' | 'solo';
 export type Phase = 'lobby' | 'count' | 'play' | 'rend' | 'shop' | 'over';

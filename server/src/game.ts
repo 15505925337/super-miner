@@ -166,7 +166,9 @@ export function openBag(room: Room, p: Player, it: Item): { v: number; s?: strin
   const rnd = (a: number, b: number) => Math.round((a + r2 * (b - a)) / 10) * 10;
   const giveTool = () => { const k = tools[Math.floor(r2 * tools.length)]; p.tools[k] = Math.min(RULES.toolMax, p.tools[k] + 1); return SHOP[k].n + ' ×1'; };
   if (p.buff.clover) return r < BAG.clover.moneyChance ? { v: rnd(BAG.clover.moneyMin, BAG.clover.moneyMax) } : { v: BAG.clover.elseMoney, s: giveTool() };
-  const good = BAG.strongBelow, boosted = Math.min(1, good * (CHARACTERS[p.c].bagMul ?? 1));
+  const good = BAG.strongBelow;
+  const emptyMul = CHARACTERS[p.c].bagEmptyMul ?? 1;
+  const boosted = good + (1 - good) * (1 - emptyMul);
   // 只把新增的好运区间按原比例映射到钱、道具和大力，原本的好结果照旧。
   if (r >= good && r < boosted) r = (r - good) / (boosted - good) * good;
   if (r < BAG.moneyBelow) return { v: rnd(BAG.moneyMin, BAG.moneyMax) };
