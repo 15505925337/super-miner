@@ -13,8 +13,3 @@ void fragment() {
 		COLOR.rgb = clamp(c * grade_tint, 0.0, 1.0);
 	}
 }
-
-void light() {
-	// 方向光实测只照物件和矿工。底图仍接收点光和环境明暗。
-	LIGHT = LIGHT_IS_DIRECTIONAL ? vec4(0.0) : vec4(COLOR.rgb * LIGHT_COLOR.rgb * LIGHT_ENERGY, LIGHT_COLOR.a);
-}

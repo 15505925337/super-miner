@@ -4,9 +4,10 @@ render_mode unshaded, blend_add;
 
 uniform vec2 sweep_axis = vec2(0.5);
 uniform vec2 sweep = vec2(0.0); // 高光带的位置和强度
+uniform vec4 light_col : source_color = vec4(1.0);
 
 void fragment() {
 	float diagonal = dot(UV - vec2(0.5), sweep_axis) + 0.5;
 	float highlight = 1.0 - smoothstep(0.012, 0.095, abs(diagonal - sweep.x));
-	COLOR.rgb += vec3(1.0, 0.82, 0.48) * (highlight * sweep.y);
+	COLOR.rgb += light_col.rgb * (highlight * sweep.y);
 }

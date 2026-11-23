@@ -9,6 +9,7 @@ const ITEM := preload("res://scenes/item.tscn")
 const HOOK := preload("res://scenes/hook.tscn")
 const LIGHT_TEX := preload("res://res/light_radial.tres")
 const HALO := preload("res://res/halo.tres")
+const SOFT_SHADOW := preload("res://res/soft_shadow.tres")
 const MAT_ADD := preload("res://res/mat_add.tres")
 const MAT_UNSHADED := preload("res://res/mat_unshaded.tres")
 const ICE := preload("res://art/ice.png")
@@ -22,6 +23,8 @@ const MINER_SIZE := 64.0
 const DARK_MINER_BRIGHTNESS := 0.40
 const MINER_SOURCE_SIZE := 512.0
 const WINCH_ROPE_EXIT := Vector2(256, 432)    # 四个矿工的各帧共用同一处绳卷出绳点
+const MINER_LEDGE_OFFSET := 31.8             # 贴图中心到台沿的距离（游戏像素）
+const MINER_CONTACT := Vector2(-11.0, MINER_LEDGE_OFFSET)
 const MINER_POSES := [
 	"idle", "idle2", "crank1", "crank2", "crank3", "crank4",
 	"pull", "pull2", "happy", "happy2", "sad", "hit", "throw",
@@ -35,54 +38,49 @@ static var _fx_frames := {}
 
 # 以原画为主。井壁、远景和支架共用同一层的调色，环境光只在黑灯事件里压暗。
 #   grade [伽马, 对比度, 饱和度]；grade_tint 各色通道倍率；bag_chest_glow 宝袋和宝箱的黑灯倍率；bloom 泛光强度
-#   lights [灯芯位置, 颜色, 光柱（0 没有，1 朝下，2 斜着）]
-#   rim    哪些矿物在这一层和底图颜色太接近，要加描边光；dust 飘尘的颜色
+#   light_dir 是光照过去的单位向量（向右、向下为正）；light_col 主光色；under_col 岩浆反光
+#   lamps 是原画里的光源位置；beam 是光柱半张角；rim 是需要额外辨识度的物件的描边强度
 const TIERS := [
 	{   # 浅土层：保留原画里的土黄色和斜阳
 		"bg": "bg_1", "grade": Vector3.ONE, "bag_chest_glow": 1.4, "bloom": 0.06,
 		"ledge": 225.0,
-		"lights": [[Vector2(24, 15), Color(1, 0.9, 0.68), 2]],
-		"rim": {"fos": Color(0.3, 0.17, 0.09, 0.7)}, "dust": Color(1, 0.95, 0.8),
+		"light_dir": Vector2(0.707107, 0.707107), "light_col": Color(1.0, 0.94, 0.82),
+		"lamps": [Vector2(24, 15)], "beam": 0.30,
+		"rim": {"fos": 0.7}, "dust": Color(1, 0.95, 0.8),
 	},
 	{   # 岩石层：两盏矿灯打下暖光，井壁是冷色的碎裂岩块
 		"bg": "bg_2", "grade": Vector3.ONE, "bag_chest_glow": 1.85, "bloom": 0.06,
 		"ledge": 233.0,
-		"lights": [
-			[Vector2(81, 51), Color(1, 0.7, 0.38), 1],
-			[Vector2(403, 51), Color(1, 0.7, 0.38), 1],
-		],
-		"rim": {"fos": Color(1, 0.92, 0.75, 0.5), "rs": Color(0.75, 0.82, 0.95, 0.4), "rl": Color(0.75, 0.82, 0.95, 0.4)}, "dust": Color(1, 0.92, 0.78),
+		"light_dir": Vector2(0.28, 0.96), "light_col": Color(1.0, 0.78, 0.52),
+		"lamps": [Vector2(81, 51), Vector2(403, 51)], "beam": 0.46,
+		"rim": {"fos": 0.5, "rs": 0.4, "rl": 0.4}, "dust": Color(1, 0.92, 0.78),
 	},
 	{   # 晶洞层：提亮蓝紫色岩壁，支架蓝灯只留小光晕
 		"bg": "bg_3", "grade": Vector3(1.18, 1.02, 1.04), "bag_chest_glow": 2.15, "bloom": 0.04,
 		"ledge": 228.0,
-		"lights": [
-			[Vector2(135, 20), Color(0.56, 0.8, 1), 0],
-			[Vector2(322, 20), Color(0.56, 0.8, 1), 0],
-			[Vector2(520, 20), Color(0.56, 0.8, 1), 0],
-		],
-		"rim": {"gem": Color(0.9, 1, 1, 0.75), "bug": Color(1, 0.92, 1, 0.8), "rub": Color(1, 0.9, 0.92, 0.6), "rs": Color(0.75, 0.82, 1, 0.4), "rl": Color(0.75, 0.82, 1, 0.4)}, "dust": Color(0.6, 0.95, 1),
+		"light_dir": Vector2(0.20, 0.979796), "light_col": Color(0.64, 0.83, 1.0),
+		"lamps": [Vector2(135, 20), Vector2(322, 20), Vector2(520, 20)],
+		"rim": {"gem": 0.75, "bug": 0.8, "rub": 0.6, "rs": 0.4, "rl": 0.4}, "dust": Color(0.6, 0.95, 1),
 	},
 	{   # 熔岩层：井架挂灯，井壁保留原有的岩浆裂缝自发光
 		"bg": "bg_4", "grade": Vector3(1.34, 1.12, 1.40), "grade_tint": Vector3(1.08, 1.05, 0.60),
 		"bag_chest_glow": 2.9, "bloom": 0.06,
 		"ledge": 216.0,
-		"lights": [[Vector2(151, 37), Color(1, 0.68, 0.36), 1]],
-		"rim": {"rs": Color(0.85, 0.8, 0.85, 0.4), "rl": Color(0.85, 0.8, 0.85, 0.4), "tnt": Color(1.0, 0.76, 0.47, 0.28)},
+		"light_dir": Vector2(0.60, 0.80), "light_col": Color(1.0, 0.74, 0.47),
+		"under_col": Color(1.0, 0.32, 0.20, 0.22),
+		"lamps": [Vector2(151, 37)], "beam": 0.46,
+		"rim": {"rs": 0.4, "rl": 0.4, "tnt": 0.28},
 		"dust": Color(1, 0.55, 0.2),
 	},
 ]
 
 var quality: int = Cfg.Q.HIGH
 var fx_on := true
-var light_test_args := {}         # 只由主场景从网页网址传入
 var bloom := 0.06                # 当前层要的泛光强度，主场景来读
 var _k := 1.0
 var _items := {}                 # 物件 id → 节点
-var _miners := {}                # 玩家 id → { root, sprite, hook, frames, ice }
+var _miners := {}                # 玩家 id → { root, sprite, shadow, hook, frames, ice }
 var _extra: Array[PointLight2D] = []
-var _test_light: Light2D
-var _move_test_light := false
 var _t := 0.0
 var _tier := -1
 var _base := Vector2.ZERO         # 这口井在画面上的位置（震动是在它上面加一点偏移）
@@ -115,7 +113,6 @@ func _ready() -> void:
 	far.material = bm
 	frame_layer.material = bm
 	emis.texture = LAVA_CRACKS
-	_setup_light_test()
 	set_draw_area(Rect2(0, 0, Cfg.GW, Cfg.GH))
 	_set_tier(1)
 	apply(quality, fx_on)
@@ -123,41 +120,6 @@ func _ready() -> void:
 
 func _lit() -> bool:
 	return fx_on and quality != Cfg.Q.LOW
-
-
-func _setup_light_test() -> void:
-	match light_test_args.get("lt", ""):
-		"dir":
-			var directional := DirectionalLight2D.new()
-			# 正角度从朝下顺时针转。默认向右下方照，稍抬高以显示法线的明暗变化。
-			directional.rotation_degrees = fposmod(_light_test_number("ltd", -45.0), 360.0)
-			directional.height = 0.35
-			directional.energy = clampf(_light_test_number("lte", 0.2), 0.0, 1.0)
-			_test_light = directional
-			# 方向光忽略受光遮罩。底图由着色器排除，剪影和飘尘由无光照材质排除。
-			foreground.material = MAT_UNSHADED
-			dust.material = MAT_ADD
-		"occ":
-			var point := PointLight2D.new()
-			point.texture = LIGHT_TEX
-			point.texture_scale = 2.4
-			point.position = Vector2(320.0, 190.0)
-			point.height = 20.0
-			point.energy = 0.8
-			point.shadow_enabled = true
-			point.range_z_min = bg.z_index
-			point.range_z_max = 0
-			_test_light = point
-			_move_test_light = light_test_args.get("ltm", "0") == "1"
-	if _test_light != null:
-		add_child(_test_light)
-
-
-func _light_test_number(key: String, fallback: float) -> float:
-	var value := String(light_test_args.get(key, ""))
-	if value.is_valid_float() and is_finite(value.to_float()):
-		return value.to_float()
-	return fallback
 
 
 func _set_tier(tier: int) -> void:
@@ -173,13 +135,14 @@ func _set_tier(tier: int) -> void:
 	emis.visible = tier == 3 and _show_lava_cracks
 	dust.color = Color(t.dust.r, t.dust.g, t.dust.b, 0.85)
 	embers.emitting = tier == 3
-	embers.visible = tier == 3 and fx_on
 	for c in lights_root.get_children():
 		lights_root.remove_child(c)
 		c.queue_free()
-	for l in t.lights:
+	var light_col: Color = t.light_col
+	var beam := float(t.get("beam", 0.0))
+	for lamp_pos in t.lamps:
 		var node := Node2D.new()
-		node.position = l[0]
+		node.position = lamp_pos
 		# 小光晕和光柱画在矿工后面。
 		var halo := Sprite2D.new()
 		halo.texture = HALO
@@ -187,27 +150,27 @@ func _set_tier(tier: int) -> void:
 		halo.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
 		halo.z_index = -5
 		halo.scale = Vector2.ONE * 0.28
-		halo.modulate = Color(l[1].r, l[1].g, l[1].b, 0.18)
+		halo.modulate = Color(light_col, 0.18)
 		node.add_child(halo)
-		var beam := int(l[2])
-		if beam > 0:
+		if beam > 0.0:
 			var shaft := ColorRect.new()
 			var m := ShaderMaterial.new()
 			m.shader = SHAFT
 			m.set_shader_parameter("strength", 0.045)
-			m.set_shader_parameter("tint", Color(l[1].r, l[1].g, l[1].b, 1.0))
-			m.set_shader_parameter("seed", l[0].x * 0.01)
-			m.set_shader_parameter("half_angle", 0.46 if beam == 1 else 0.3)
+			m.set_shader_parameter("tint", light_col)
+			m.set_shader_parameter("seed", node.position.x * 0.01)
+			m.set_shader_parameter("half_angle", beam)
 			shaft.material = m
-			shaft.position = Vector2(-70, 2)
+			shaft.position = Vector2(-70, 0)
 			shaft.size = Vector2(140, 140)
 			shaft.pivot_offset = Vector2(70, 0)
-			if beam == 2:
-				shaft.rotation = 0.5 if l[0].x < 320.0 else -0.42
+			shaft.rotation = Vector2.DOWN.angle_to(t.light_dir)
 			shaft.z_index = -6
 			shaft.mouse_filter = Control.MOUSE_FILTER_IGNORE
 			node.add_child(shaft)
 		lights_root.add_child(node)
+	for n in _items.values():
+		_set_item_lighting(n)
 	apply(quality, fx_on)
 
 
@@ -233,8 +196,8 @@ func set_view(items: Array, players: Array, info: Dictionary) -> void:
 			n = ITEM.instantiate()
 			n.kind = Cfg.type_key(it.t)
 			n.uid = id
-			n.cast_test_shadow = _test_light is PointLight2D
 			items_root.add_child(n)
+			_set_item_lighting(n)
 			_set_item_look(n)
 			_items[id] = n
 			if live and _live_t >= 0.0 and _t - _live_t > 0.6:     # 开挖以后才冒出来的（丢来的石头、金矿雨、塌方）：从小变大弹一下
@@ -271,7 +234,7 @@ func set_view(items: Array, players: Array, info: Dictionary) -> void:
 		var frame := String(p.get("frame", "idle"))
 		m.sprite.texture = m.frames[frame]
 		# 动作帧已画好身体起伏，整张图保持固定，让木台贴着台沿。
-		m.root.position = Vector2(x, ledge - 31.8)
+		m.root.position = Vector2(x, ledge - MINER_LEDGE_OFFSET)
 		m.ice.visible = int(p.fz) == 1
 		var pivot := Vector2(x, y0)
 		var winch: Vector2 = m.root.position + (WINCH_ROPE_EXIT - sprite_center) * source_scale
@@ -296,9 +259,16 @@ func _make_miner(c: int) -> Dictionary:
 		frames[pose] = load(base + ("" if pose == "idle" else "_" + pose) + ".tres")
 	var sprite := Sprite2D.new()
 	sprite.texture = frames.idle
-	sprite.material = null if _test_light is DirectionalLight2D and _test_light.enabled else MAT_UNSHADED
+	sprite.material = MAT_UNSHADED
 	sprite.scale = Vector2.ONE * MINER_SIZE / float(frames.idle.get_width())
 	root.add_child(sprite)
+	# 木台底部在贴图中心的左侧，短影贴住底边和台沿。
+	var shadow := Sprite2D.new()
+	shadow.texture = SOFT_SHADOW
+	shadow.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+	shadow.scale = Vector2(42.0, 3.5) / SOFT_SHADOW.get_size()
+	shadow.z_index = -1
+	root.add_child(shadow)
 	var ice := Sprite2D.new()
 	ice.texture = ICE
 	ice.material = MAT_UNSHADED
@@ -309,7 +279,7 @@ func _make_miner(c: int) -> Dictionary:
 	root.add_child(ice)
 	var hook: Node2D = HOOK.instantiate()
 	miners_root.add_child(hook)
-	var m := {"c": c, "root": root, "sprite": sprite, "hook": hook, "frames": frames, "ice": ice}
+	var m := {"c": c, "root": root, "sprite": sprite, "shadow": shadow, "hook": hook, "frames": frames, "ice": ice}
 	_set_miner_dark(m, _dark)
 	return m
 
@@ -347,21 +317,33 @@ func shake(amount: float) -> void:
 		_shake = maxf(_shake, amount)
 
 
+func _set_item_lighting(n: Node2D) -> void:
+	var conf: Dictionary = TIERS[_tier]
+	n.set_lighting(conf.light_dir, conf.light_col, conf.get("under_col", Color.TRANSPARENT))
+
+
 func _set_item_look(n: Node2D) -> void:
 	var conf: Dictionary = TIERS[_tier]
+	var detail := _lit()
 	var levels: Vector2 = Cfg.GLOW.get(n.kind, Vector2.ZERO)
 	var dark_glow := levels.y
 	if n.kind in ["bag", "chest"]:
 		dark_glow *= float(conf.bag_chest_glow)
-	var rim: Color = conf.rim.get(n.kind, Color.TRANSPARENT)
-	rim.a *= 1.0 - _dark
-	n.set_look(fx_on, _lit(), _dark, lerpf(levels.x if fx_on else 0.0, dark_glow, _dark), rim)
+	var rim_strength := float(conf.rim.get(n.kind, 0.20))
+	n.set_look(detail, _dark, lerpf(levels.x if detail else 0.0, dark_glow, _dark), rim_strength)
+
+
+func _set_miner_shadow(m: Dictionary) -> void:
+	m.shadow.position = MINER_CONTACT + TIERS[_tier].light_dir * 1.35
+	m.shadow.modulate.a = 0.58 * (1.0 - _dark)
+	m.shadow.visible = _lit() and _dark < 1.0
 
 
 func _set_miner_dark(m: Dictionary, dark: float) -> void:
 	m.hook.set_dark(dark)
 	var brightness := lerpf(1.0, DARK_MINER_BRIGHTNESS, dark)
 	m.root.modulate = Color(brightness, brightness, brightness, m.root.modulate.a)
+	_set_miner_shadow(m)
 
 
 # 黑灯是对局事件，所有画质和光影开关共用同一套明暗过渡。
@@ -369,9 +351,6 @@ func _apply_dark() -> void:
 	var d := _dark
 	_dark_done = d
 	ambient.color = Color.WHITE.lerp(DARK_AMBIENT, d)
-	if _test_light is DirectionalLight2D:
-		foreground.self_modulate = ambient.color
-		dust.self_modulate = ambient.color
 	lights_root.modulate.a = 1.0 - d
 	embers.modulate.a = 1.0 - d
 	for n in _items.values():
@@ -505,13 +484,11 @@ func _process(dt: float) -> void:
 	if absf(_dark - _dark_done) > 0.02 or (_dark == _dark_want and _dark != _dark_done):
 		_apply_dark()
 	if emis.visible:
-		var pulse := 0.8 + 0.2 * sin(_t * 1.3) + 0.08 * sin(_t * 3.7) if fx_on else 0.8
+		var pulse := 0.8 + 0.2 * sin(_t * 1.3) + 0.08 * sin(_t * 3.7) if _lit() else 0.8
 		emis.modulate.a = LAVA_CRACK_STRENGTH * pulse * (1.0 - _dark)
 	for i in _extra.size():
 		var a := _t * (0.25 + 0.05 * i) + i * 1.7
 		_extra[i].position = Vector2(320.0 + cos(a) * (120.0 + 22.0 * (i % 5)), 215.0 + sin(a * 1.3) * 95.0)
-	if _move_test_light:
-		_test_light.position.x = 320.0 + 240.0 * sin(_t * TAU / 12.0)
 
 
 # 画质和光影开关控制装饰效果，黑灯事件由 _apply_dark 处理。
@@ -519,21 +496,18 @@ func apply(q: int, fx: bool) -> void:
 	quality = q
 	fx_on = fx
 	var lit := _lit()
-	lights_root.visible = fx
+	lights_root.visible = lit
 	for n in _items.values():
 		_set_item_look(n)
+	for m in _miners.values():
+		_set_miner_shadow(m)
 	for n in fx_root.get_children():
 		if n.material == MAT_ADD:
 			n.visible = lit
-	embers.visible = fx and _tier == 3
-	dust.visible = fx and q != Cfg.Q.LOW
+	embers.visible = lit and _tier == 3
+	dust.visible = lit
 	for l in _extra:
 		l.enabled = lit
-	if _test_light != null:
-		_test_light.enabled = lit
-		if _test_light is DirectionalLight2D:
-			for m in _miners.values():
-				m.sprite.material = null if lit else MAT_UNSHADED
 
 
 # 压力测试：把同屏真灯的总数加到 n 盏（多出来的在井里转圈）
@@ -553,7 +527,7 @@ func set_light_count(n: int) -> void:
 
 
 func light_count() -> int:
-	return _extra.size() + int(_test_light != null) if _lit() else 0
+	return _extra.size() if _lit() else 0
 
 
 # 灯光高度要跟着放大倍数走，不然放大后光会显得更"贴地"
