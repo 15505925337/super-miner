@@ -13,6 +13,15 @@ const MAT_ADD := preload("res://res/mat_add.tres")
 const MAT_UNSHADED := preload("res://res/mat_unshaded.tres")
 const SHAFT := preload("res://shaders/shaft.gdshader")
 const BG_SHADER := preload("res://shaders/bg.gdshader")
+const MINER_SIZE := 64.0
+const MINER_SOURCE_SIZE := 512.0
+# 矿工头灯灯芯在原图上的位置，按平时、使劲拉、拉上来的姿势排列。
+const HEAD_LAMPS := [
+	{"idle": Vector2(153, 249), "pull": Vector2(125, 253), "happy": Vector2(146, 241)},
+	{"idle": Vector2(130, 246), "pull": Vector2(119, 261), "happy": Vector2(130, 246)},
+	{"idle": Vector2(145, 211), "pull": Vector2(134, 235), "happy": Vector2(145, 211)},
+	{"idle": Vector2(146, 205), "pull": Vector2(120, 211), "happy": Vector2(146, 205)},
+]
 
 # 明暗对比（用户定的，要有反差感）。做法：
 #   环境光压得比较低、偏冷；真的灯放在底图里画着光源的位置，偏暖、够亮；
@@ -27,22 +36,37 @@ const BG_SHADER := preload("res://shaders/bg.gdshader")
 const TIERS := [
 	{   # 浅土层：晴天的地面，阳光从左上斜着照进土里，往下渐暗
 		"bg": "bg_1", "amb": Color(0.5, 0.47, 0.5), "deep": 0.62, "glow": 0.3, "bloom": 0.24, "detail": 0.42, "bump": 1.0, "emis": 0.0,
-		"lights": [[Vector2(60, 40), Color(1, 0.9, 0.68), 1.15, 3.6, 2, 50.0], [Vector2(560, 60), Color(1, 0.86, 0.6), 0.5, 2.4, 0, 46.0]],
+		"ledge": 225.0,
+		"lights": [[Vector2(24, 15), Color(1, 0.9, 0.68), 1.15, 3.6, 2, 50.0]],
 		"rim": {"fos": Color(0.3, 0.17, 0.09, 0.7)}, "dust": Color(1, 0.95, 0.8),
 	},
-	{   # 岩石层：矿灯的暖光从上面打下来，右上一束冷色天光，井壁是碎裂的岩块
+	{   # 岩石层：两盏矿灯打下暖光，井壁是冷色的碎裂岩块
 		"bg": "bg_2", "amb": Color(0.33, 0.38, 0.56), "deep": 0.62, "glow": 0.45, "bloom": 0.28, "detail": 0.42, "bump": 1.1, "emis": 0.7,
-		"lights": [[Vector2(360, 26), Color(1, 0.7, 0.38), 1.3, 2.3, 1, 46.0], [Vector2(522, 26), Color(1, 0.7, 0.38), 1.1, 2.2, 0, 46.0], [Vector2(612, 14), Color(0.55, 0.82, 1), 0.75, 2.6, 2, 54.0], [Vector2(50, 26), Color(1, 0.7, 0.38), 1.2, 2.1, 1, 46.0]],
+		"ledge": 233.0,
+		"lights": [
+			[Vector2(81, 51), Color(1, 0.7, 0.38), 1.3, 2.3, 1, 46.0],
+			[Vector2(403, 51), Color(1, 0.7, 0.38), 1.2, 2.2, 1, 46.0],
+		],
 		"rim": {"fos": Color(1, 0.92, 0.75, 0.5), "rs": Color(0.75, 0.82, 0.95, 0.4), "rl": Color(0.75, 0.82, 0.95, 0.4)}, "dust": Color(1, 0.92, 0.78),
 	},
-	{   # 晶洞层：晶体的青光和紫光，井壁是竖长的晶面，裂缝里有发光的矿脉
+	{   # 晶洞层：横梁的蓝灯、远处晶体的青光和紫光
 		"bg": "bg_3", "amb": Color(0.34, 0.34, 0.6), "deep": 0.62, "glow": 0.55, "bloom": 0.36, "detail": 0.4, "bump": 1.2, "emis": 0.9,
-		"lights": [[Vector2(400, 40), Color(0.4, 0.95, 1), 1.3, 2.4, 2, 44.0], [Vector2(533, 44), Color(0.4, 0.95, 1), 1.2, 2.2, 0, 44.0], [Vector2(14, 64), Color(0.8, 0.55, 1), 1.3, 2.2, 0, 44.0], [Vector2(230, 34), Color(0.5, 0.7, 1), 0.9, 2.0, 2, 44.0]],
+		"ledge": 228.0,
+		"lights": [
+			[Vector2(135, 20), Color(0.56, 0.8, 1), 0.72, 1.8, 1, 44.0],
+			[Vector2(322, 20), Color(0.56, 0.8, 1), 0.68, 1.8, 1, 44.0],
+			[Vector2(520, 20), Color(0.56, 0.8, 1), 0.72, 1.8, 1, 44.0],
+			[Vector2(20, 61), Color(0.8, 0.55, 1), 1.15, 2.2, 0, 44.0],
+			[Vector2(397, 32), Color(0.4, 0.95, 1), 0.8, 2.2, 0, 44.0],
+			[Vector2(561, 46), Color(0.4, 0.95, 1), 0.65, 1.7, 0, 44.0],
+			[Vector2(606, 63), Color(0.4, 0.95, 1), 0.55, 1.65, 0, 44.0],
+		],
 		"rim": {"gem": Color(0.9, 1, 1, 0.75), "bug": Color(1, 0.92, 1, 0.8), "rub": Color(1, 0.9, 0.92, 0.6), "rs": Color(0.75, 0.82, 1, 0.4), "rl": Color(0.75, 0.82, 1, 0.4)}, "dust": Color(0.6, 0.95, 1),
 	},
-	{   # 熔岩层：上面一盏矿灯，光主要从下面来——裂缝里的岩浆和井底的红光
+	{   # 熔岩层：井架挂灯，井壁保留原有的岩浆裂缝自发光
 		"bg": "bg_4", "amb": Color(0.4, 0.32, 0.36), "deep": 0.8, "glow": 0.8, "bloom": 0.44, "detail": 0.45, "bump": 1.2, "emis": 1.0,
-		"lights": [[Vector2(147, 36), Color(1, 0.68, 0.36), 1.5, 2.2, 1, 42.0], [Vector2(20, 350), Color(1, 0.34, 0.12), 1.7, 3.0, 0, 30.0], [Vector2(620, 352), Color(1, 0.34, 0.12), 1.7, 3.0, 0, 30.0], [Vector2(320, 392), Color(1, 0.3, 0.1), 1.3, 3.4, 0, 30.0]],
+		"ledge": 216.0,
+		"lights": [[Vector2(151, 37), Color(1, 0.68, 0.36), 1.5, 2.2, 1, 42.0]],
 		"rim": {"rs": Color(0.85, 0.8, 0.85, 0.4), "rl": Color(0.85, 0.8, 0.85, 0.4)}, "dust": Color(1, 0.55, 0.2),
 	},
 ]
@@ -56,7 +80,6 @@ var _miners := {}                # 玩家 id → { root, sprite, hook, frames, c
 var _extra: Array[PointLight2D] = []
 var _t := 0.0
 var _tier := -1
-var _layers := {}                # 纵深的图层：far / frame / fg，有图才建
 var _base := Vector2.ZERO         # 这口井在画面上的位置（震动是在它上面加一点偏移）
 var _shake := 0.0                 # 震动的幅度（游戏像素），自己衰减
 var _dark := 0.0                  # 黑灯的程度，0 正常，1 全黑（只剩钩灯、头灯和会发光的东西）
@@ -66,7 +89,10 @@ var _live_t := -1.0               # 这一关是从什么时候开始挖的（�
 var _emis := 0.0
 
 @onready var ambient: CanvasModulate = $Ambient
+@onready var far: Sprite2D = $Far
 @onready var bg: Sprite2D = $Bg
+@onready var frame_layer: Sprite2D = $Frame
+@onready var foreground: Sprite2D = $Foreground
 @onready var lights_root: Node2D = $Lights
 @onready var items_root: Node2D = $Items
 @onready var miners_root: Node2D = $Miners
@@ -83,6 +109,7 @@ func _ready() -> void:
 	var bm := ShaderMaterial.new()
 	bm.shader = BG_SHADER
 	bg.material = bm
+	set_draw_area(Rect2(0, 0, Cfg.GW, Cfg.GH))
 	_set_tier(1)
 	apply(quality, fx_on)
 
@@ -95,6 +122,9 @@ func _set_tier(tier: int) -> void:
 	_tier = tier
 	var t: Dictionary = TIERS[tier]
 	bg.texture = load("res://art/%s.png" % t.bg)
+	far.texture = load("res://art/%s_far.png" % t.bg)
+	frame_layer.texture = load("res://art/%s_frame.png" % t.bg)
+	foreground.texture = load("res://art/%s_fg.png" % t.bg)
 	ambient.color = t.amb
 	bloom = t.bloom
 	var bm: ShaderMaterial = bg.material
@@ -105,35 +135,11 @@ func _set_tier(tier: int) -> void:
 	bm.set_shader_parameter("bump", t.bump)
 	emis.texture = load("res://art/relief_%d_e.png" % tier)
 	_emis = t.emis
-	# 纵深的三层图：远景后墙、支架层、前景剪影（文件名和画法见 素材清单.md）。有图用图，没图照旧。
-	# 现在只是按位置叠上去；分层移动（视差）和前后景虚化放在画面收尾里做，到时灯的位置也要按新图重新对
-	for d in [["far", -8], ["frame", -7], ["fg", 62]]:
-		var path := "res://art/%s_%s.png" % [t.bg, d[0]]
-		var has := ResourceLoader.exists(path)
-		if not has and not _layers.has(d[0]):
-			continue
-		if not _layers.has(d[0]):
-			var s := Sprite2D.new()
-			s.centered = false
-			s.scale = Vector2.ONE / 3.0
-			s.z_index = d[1]
-			s.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
-			if d[0] == "far":                     # 远景只盖住地面线以上那一条
-				s.region_enabled = true
-				s.region_rect = Rect2(0, 0, 1920, 240)
-			if d[0] == "fg":                      # 前景剪影不吃灯光
-				var m := CanvasItemMaterial.new()
-				m.light_mode = CanvasItemMaterial.LIGHT_MODE_UNSHADED
-				s.material = m
-			add_child(s)
-			_layers[d[0]] = s
-		_layers[d[0]].visible = has
-		if has:
-			_layers[d[0]].texture = load(path)
 	dust.color = Color(t.dust.r, t.dust.g, t.dust.b, 0.85)
 	embers.emitting = tier == 3
 	embers.visible = tier == 3 and fx_on
 	for c in lights_root.get_children():
+		lights_root.remove_child(c)
 		c.queue_free()
 	for l in t.lights:
 		var node := Node2D.new()
@@ -176,7 +182,7 @@ func _set_tier(tier: int) -> void:
 	apply(quality, fx_on)
 
 
-# items：[{id, t, x, y, by}]，坐标是服务端单位。players：[{id, c, x, ang, len, st, fz, sg, out, frame}]
+# items：[{id, t, x, y, by, walk_dx}]，坐标是服务端单位。players：[{id, c, x, ang, len, st, fz, sg, out, frame}]
 # info：{live, tier}
 func set_view(items: Array, players: Array, info: Dictionary) -> void:
 	var tier := int(info.get("tier", 1))
@@ -207,6 +213,7 @@ func set_view(items: Array, players: Array, info: Dictionary) -> void:
 				n.create_tween().tween_property(n, "scale", Vector2.ONE, 0.32).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 				fx_boom(Vector2(it.x, it.y) * Cfg.S, 26.0, Color(0.8, 0.72, 0.6), 0.3)
 		n.position = Vector2(it.x, it.y) * Cfg.S
+		n.walk_dx = float(it.get("walk_dx", 0.0))
 		n.modulate.a = 1.0 if live else 0.6
 	for id in _items.keys():
 		if not seen.has(id):
@@ -215,7 +222,7 @@ func set_view(items: Array, players: Array, info: Dictionary) -> void:
 
 	seen = {}
 	var y0: float = float(Cfg.b().Y0) * Cfg.S
-	var surf: float = float(Cfg.b().SURF) * Cfg.S
+	var ledge := float(conf.ledge) / 3.0
 	for p in players:
 		var id := int(p.id)
 		seen[id] = true
@@ -228,10 +235,12 @@ func set_view(items: Array, players: Array, info: Dictionary) -> void:
 		var hauling := st == 2 or st == 4
 		var frame := String(p.get("frame", "idle"))
 		m.sprite.texture = m.frames[frame]
-		# 照原型：整张图画成 64×64（游戏像素），底边在地面线下 3
+		# 512 像素原图的木台到 y≈510。保持 64×64 的绘制尺寸，把木台底边落在图里的台沿上。
 		var bob := sin(_t * 15.0) * 0.6 if hauling else sin(_t * 2.3 + int(p.c) * 2.0) * 0.35
 		var hop := -absf(sin(float(p.get("joy", 0.0)) * PI)) * 3.5
-		m.root.position = Vector2(x, surf - 29.0 + hop + (bob if hauling else 0.0))
+		m.root.position = Vector2(x, ledge - 31.8 + hop + (bob if hauling else 0.0))
+		var head_lamp: Vector2 = HEAD_LAMPS[int(p.c) % HEAD_LAMPS.size()][frame]
+		m.head.position = (head_lamp - Vector2.ONE * (MINER_SOURCE_SIZE * 0.5)) * (MINER_SIZE / MINER_SOURCE_SIZE)
 		m.sprite.modulate = Color(0.75, 0.95, 1.0) if int(p.fz) == 1 else Color(1, 1, 1)
 		m.hook.position = Vector2(x, y0)
 		m.hook.apply(float(p.ang), float(p.len) * Cfg.S, hauling, int(p.fz) == 1, int(p.sg) == 1)
@@ -252,12 +261,11 @@ func _make_miner(c: int) -> Dictionary:
 	var frames := {"idle": load(base + ".tres"), "pull": load(base + "_pull.tres"), "happy": load(base + "_happy.tres")}
 	var sprite := Sprite2D.new()
 	sprite.texture = frames.idle
-	sprite.scale = Vector2.ONE * 64.0 / float(frames.idle.get_width())
+	sprite.scale = Vector2.ONE * MINER_SIZE / float(frames.idle.get_width())
 	root.add_child(sprite)
 	var head := PointLight2D.new()                # 头灯：照亮矿工自己和脚下一小块
 	head.texture = LIGHT_TEX
 	head.texture_scale = 0.5
-	head.position = Vector2(-14, -8)
 	head.color = Color(1, 0.9, 0.7)
 	head.energy = 0.3
 	head.height = 20.0
@@ -274,6 +282,24 @@ func _make_miner(c: int) -> Dictionary:
 func miner_pos(id: int) -> Vector2:
 	var m: Dictionary = _miners.get(id, {})
 	return m.root.position if not m.is_empty() else Vector2(320, 51)
+
+
+# 井壁、远景与支架在窗口露出的范围内按同一坐标镜像。剪影贴着实际画面四边，避免在中央竖起两道剪影。
+func set_draw_area(area: Rect2) -> void:
+	var visible_area := area.merge(Rect2(0, 0, Cfg.GW, Cfg.GH)).grow(4.0)
+	var cave := Rect2(visible_area.position.x, 80.0, visible_area.size.x, visible_area.end.y - 80.0)
+	bg.position = cave.position
+	bg.region_rect = Rect2(cave.position * 3.0, cave.size * 3.0)
+	bg.material.set_shader_parameter("region_origin", bg.region_rect.position)
+	emis.position = cave.position
+	emis.region_rect = Rect2(cave.position * 1.5, cave.size * 1.5)
+	var passage := Rect2(visible_area.position.x, 0.0, visible_area.size.x, 80.0)
+	far.position = passage.position
+	far.region_rect = Rect2(passage.position * 3.0, passage.size * 3.0)
+	frame_layer.position = far.position
+	frame_layer.region_rect = far.region_rect
+	foreground.position = area.position
+	foreground.scale = area.size / Vector2(1920, 1080)
 
 
 # 这口井在画面上的位置；震一下（幅度是游戏像素，取大的那个）

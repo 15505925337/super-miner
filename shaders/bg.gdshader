@@ -13,10 +13,11 @@ uniform float bottom_y = 1080.0;      // 井底
 uniform float top_mul = 0.95;         // 地面线以上保留多少亮度
 uniform float deep_mul = 0.5;         // 井底保留多少亮度
 uniform float saturation = 1.12;      // 压暗后把颜色提一点，免得发灰
+uniform vec2 region_origin;          // 可见区域的左上角在原图坐标中的位置
 varying vec2 wp;
 
 void vertex() {
-	wp = VERTEX;
+	wp = VERTEX + region_origin;
 }
 
 vec2 mirror(vec2 uv) {                // 画面两边、下面多出来的地方是镜像着铺的，质地也跟着镜像

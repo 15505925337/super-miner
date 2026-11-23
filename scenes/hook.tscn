@@ -1,7 +1,7 @@
 [gd_scene load_steps=6 format=3]
 
 [ext_resource type="Script" path="res://scripts/hook.gd" id="1"]
-[ext_resource type="Texture2D" path="res://art/claw_open.tres" id="2"]
+[ext_resource type="Texture2D" path="res://art/claw_1_open.tres" id="2"]
 [ext_resource type="Material" path="res://res/mat_add.tres" id="4"]
 [ext_resource type="Texture2D" path="res://res/halo.tres" id="5"]
 [ext_resource type="Texture2D" path="res://res/light_radial.tres" id="6"]
@@ -27,8 +27,8 @@ antialiased = true
 
 [node name="Sprite" type="Sprite2D" parent="Claw"]
 texture = ExtResource("2")
-offset = Vector2(0, 69)
-scale = Vector2(0.1016, 0.1016)
+offset = Vector2(0, -84)
+scale = Vector2(0.1171875, 0.1171875)
 
 [node name="Halo" type="Sprite2D" parent="Claw"]
 z_index = 50

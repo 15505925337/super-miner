@@ -1,8 +1,11 @@
 # 一个玩家的钩子（只负责画）：绳子、钩爪、钩灯。角度和绳长由服务端的状态决定。
 extends Node2D
 
-var _tex_open: Texture2D = preload("res://art/claw_open.tres")
-var _tex_closed: Texture2D = preload("res://art/claw_closed.tres")
+const Cfg = preload("res://scripts/cfg.gd")
+const TEX_OPEN := preload("res://art/claw_1_open.tres")
+const TEX_CLOSED := preload("res://art/claw_1_closed.tres")
+const MAT_UNSHADED := preload("res://res/mat_unshaded.tres")
+const RING_FROM_MOUTH := Vector2(0, -156)     # 原图绳环 (128, 56)，爪口判定点 (128, 212)
 
 @onready var rope: Line2D = $Rope
 @onready var rope_edge: Line2D = $RopeEdge
@@ -12,15 +15,32 @@ var _tex_closed: Texture2D = preload("res://art/claw_closed.tres")
 @onready var light: PointLight2D = $Claw/Light
 
 
-# ang：偏离正下方的角度（弧度）；length：转轴到爪尖的长度（游戏像素）
+func _ready() -> void:
+	if Cfg.args().get("hookdbg", "0") != "1":
+		return
+	var circle := Line2D.new()
+	var radius := float(Cfg.b().HOOK_R) * Cfg.S
+	for i in 48:
+		circle.add_point(Vector2.from_angle(TAU * i / 48.0) * radius)
+	circle.closed = true
+	circle.width = 0.75
+	circle.default_color = Color(0.32, 1.0, 0.76)
+	circle.antialiased = true
+	circle.material = MAT_UNSHADED
+	circle.z_index = 66
+	claw.add_child(circle)
+
+
+# ang：偏离正下方的角度（弧度）；length：转轴到判定圆圆心的长度（游戏像素）
 func apply(ang: float, length: float, closed: bool, frozen: bool, strong: bool) -> void:
 	var p := Vector2(sin(ang), cos(ang)) * length
 	claw.position = p
 	claw.rotation = -ang
-	var pts := PackedVector2Array([Vector2.ZERO, p])
+	var ring := p + (RING_FROM_MOUTH * claw_sprite.scale).rotated(claw.rotation)
+	var pts := PackedVector2Array([Vector2.ZERO, ring])
 	rope.points = pts
 	rope_edge.points = pts
-	claw_sprite.texture = _tex_closed if closed else _tex_open
+	claw_sprite.texture = TEX_CLOSED if closed else TEX_OPEN
 	rope.default_color = Color(0.77, 0.94, 1.0) if frozen else (Color(1.0, 0.64, 0.24) if strong else Color(0.89, 0.74, 0.52))
 	claw_sprite.modulate = Color(0.6, 0.88, 1.0) if frozen else Color(1, 1, 1)
 

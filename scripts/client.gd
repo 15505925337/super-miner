@@ -426,11 +426,15 @@ func build_view() -> Dictionary:
 			for c in cur.F[fi]:
 				var x := float(c[2])
 				var y := float(c[3])
+				var by := int(c[4])
+				var walk_dx := 0.0
 				var q = pmap.get(int(c[0]))
 				if q != null and absf(float(q[2]) - x) + absf(float(q[3]) - y) < 140.0:
+					if phase == "play" and by == 0 and int(q[4]) == 0:
+						walk_dx = x - float(q[2])
 					x = float(q[2]) + (x - float(q[2])) * a
 					y = float(q[3]) + (y - float(q[3])) * a
-				arr.append({"id": int(c[0]), "t": int(c[1]), "x": x, "y": y, "by": int(c[4])})
+				arr.append({"id": int(c[0]), "t": int(c[1]), "x": x, "y": y, "by": by, "walk_dx": walk_dx})
 			fields.append(arr)
 	else:
 		fields.append(DEMO_ITEMS)

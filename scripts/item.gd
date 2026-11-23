@@ -3,13 +3,17 @@ extends Node2D
 
 const Cfg = preload("res://scripts/cfg.gd")
 const SPRITE_SHADER := preload("res://shaders/sprite.gdshader")
+const BEETLE_FRAMES := [preload("res://art/beetle.tres"), preload("res://art/beetle_2.tres")]
+const BEETLE_GLOWS := [preload("res://art/beetle.png"), preload("res://art/beetle_2.png")]
 
 var kind := "gs"                 # 类型代号，见 shared/balance.json 的 TYPES
-var uid := 0                     # 物件 id，用来定每个物件固定的倾斜角度
+var uid := 0                     # 物件 id，决定固定的形状和倾斜角度
+var walk_dx := 0.0               # 晶甲虫在相邻两帧服务端状态中的横向位移
 var _sparkle := false
 var _t := 0.0
 var _spark_at := 0.0
-var _last_x := 0.0
+var _walk_t := 0.0
+var _walk_frame := 0
 var _mat: ShaderMaterial
 
 @onready var sprite: Sprite2D = $Sprite
@@ -21,6 +25,10 @@ var _mat: ShaderMaterial
 
 func _ready() -> void:
 	var art: String = Cfg.ART.get(kind, "gold_s")
+	if kind in ["gs", "gm", "gl", "gx"]:
+		var shape := posmod(uid, 4)
+		if shape != 0:
+			art += "_%d" % shape
 	sprite.texture = load("res://art/%s.tres" % art)
 	glow.texture = load("res://art/%s.png" % art)
 	_mat = ShaderMaterial.new()
@@ -48,7 +56,6 @@ func _ready() -> void:
 	if kind == "rub":
 		light.color = Color(1.0, 0.35, 0.45)
 	_spark_at = randf_range(0.5, 3.0)
-	_last_x = position.x
 
 
 func _process(dt: float) -> void:
@@ -62,11 +69,21 @@ func _process(dt: float) -> void:
 			s = sin(u * PI)
 	spark.modulate.a = s
 	spark.scale = Vector2.ONE * (0.05 + 0.1 * s)
-	if kind == "bug":                        # 晶甲虫：朝着跑的方向，一颠一颠
-		if absf(position.x - _last_x) > 0.02:
-			sprite.flip_h = position.x < _last_x
-		_last_x = position.x
-		sprite.position.y = sin(_t * 16.0 + uid) * 0.75
+	if kind == "bug":
+		# 位移来自相邻快照，插值走完等下一帧时也能继续迈步。被钩起或停下时恢复首帧。
+		if absf(walk_dx) > 0.02:
+			_walk_t += dt
+			sprite.flip_h = walk_dx < 0.0
+			glow.flip_h = sprite.flip_h
+		else:
+			_walk_t = 0.0
+		var frame := int(_walk_t / 0.11) % BEETLE_FRAMES.size()
+		if frame != _walk_frame:
+			_walk_frame = frame
+			sprite.texture = BEETLE_FRAMES[frame]
+			glow.texture = BEETLE_GLOWS[frame]
+		sprite.position.y = sin(_walk_t * 16.0) * 0.75
+		glow.position.y = sprite.position.y
 	if light.visible:
 		light.energy = 0.7 + 0.12 * sin(_t * 2.3)
 

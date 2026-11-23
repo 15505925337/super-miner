@@ -16,6 +16,7 @@
 #   shot=<名字>      截一张图后保存   delay=<秒>    截图前等多少秒（默认 2）
 #   bench=<秒>       测这么多秒的帧率  lights=<数量> 把同屏真灯加到这么多盏（压力测试）
 #   hud=1            显示左上角的调试文字    test=1   打开自动测试用的接口
+#   hookdbg=1        显示每个钩爪的抓取判定圆
 # 调试按键：[ 和 ] 换画质，\ 开关光影，` 显示或隐藏调试文字。
 extends Node
 
@@ -235,6 +236,9 @@ func _layout() -> void:
 	# 界面和字：让引擎按放大倍数重新生成字形，任何倍数下都清楚
 	get_tree().root.content_scale_factor = k
 	ui.position = off / k
+	var draw_area := Rect2(-ui.position, Vector2(ws) / k)
+	well.set_draw_area(draw_area)
+	ui.set_draw_area(draw_area)
 
 	# 泛光各级的分辨率：高档从 1/2 开始缩 5 级，中档从 1/4 开始缩 4 级
 	var levels := 5 if hi else 4

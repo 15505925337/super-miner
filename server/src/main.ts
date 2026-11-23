@@ -89,7 +89,7 @@ export function startServer(port: number, host: string = '127.0.0.1') {
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const port = Number(process.env.PORT || process.argv[2]) || 8060, host = process.env.HOST || '127.0.0.1';
   startServer(port, host).then(s => {
-    console.log(`深井夺金服务端已启动：http://localhost:${s.port}/`);
+    console.log(`超级矿工服务端已启动：http://localhost:${s.port}/`);
     if (host === '127.0.0.1') console.log('只允许本机访问。要让同一 WiFi 的设备进来，用 HOST=0.0.0.0 重新启动。');
   });
 }

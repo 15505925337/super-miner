@@ -8,9 +8,12 @@ extends Control
 
 const Cfg = preload("res://scripts/cfg.gd")
 const PANEL_SHADER := preload("res://shaders/ui_panel.gdshader")
-const SHOP_BG := preload("res://shaders/shop_bg.gdshader")
 const HALO := preload("res://res/halo.tres")
 const MAT_ADD := preload("res://res/mat_add.tres")
+const SHOP_SHELF_Y := 201.0                       # 原图货架上沿 y≈603
+const SHOP_COUNTER_Y := 290.0                     # 原图柜台上沿 y≈870
+const SHOP_FACE_Y := 138.0
+const SHOP_CARD_WIDTH := 84.0
 
 const MODE_DESC := {
 	"co": "共用一口井，钱算全队的，手里的钱到了累计目标才能进下一关。",
@@ -34,6 +37,7 @@ var _face := ""
 var _t := 0.0
 
 var home: Control
+var home_bg: Sprite2D
 var lobby: Control
 var hud: Control
 var hud_text: Control            # 井上的字都画在这里（在各个面板下面）
@@ -61,7 +65,8 @@ var shop_mood: Label
 var shop_bar: ProgressBar
 var shop_info: Label
 var shop_items: Control
-var shop_bg: ShaderMaterial
+var shop_bg: Sprite2D
+var shop_counter: Sprite2D
 var shop_own: Label
 var buy_btn: Button
 var offer_btn: Button
@@ -383,6 +388,8 @@ func _dot(c: Color) -> ColorRect:
 
 # ───── 首页 ─────
 func _build_home() -> void:
+	home_bg = _screen_bg(preload("res://art/home_bg.png"))
+	add_child(home_bg)
 	home = _panel(Rect2(160, 16, 320, 328))
 	home.add_child(_halo(Color(1.0, 0.74, 0.36, 0.5), Rect2(40, -34, 240, 150)))
 	var v := _vbox(home, 14)
@@ -408,6 +415,27 @@ func _build_home() -> void:
 	code_edit.custom_minimum_size = Vector2(90, 0)
 	code_edit.text_submitted.connect(func(_t): cl.join(code_edit.text, name_edit.text))
 	v.add_child(_hbox([_l("进别人的房间", 12, GOLD), _spacer(), code_edit, _b("进房间", func(): cl.join(code_edit.text, name_edit.text), "join")]))
+
+
+# 整屏底图与井下用同一比例，超出原图的部分镜像延展。
+func _screen_bg(texture: Texture2D) -> Sprite2D:
+	var bg := Sprite2D.new()
+	bg.texture = texture
+	bg.centered = false
+	bg.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+	bg.texture_repeat = CanvasItem.TEXTURE_REPEAT_MIRROR
+	bg.scale = Vector2.ONE / 3.0
+	bg.region_enabled = true
+	return bg
+
+
+func set_draw_area(area: Rect2) -> void:
+	for bg in [home_bg, shop_bg]:
+		bg.position = area.position
+		bg.region_rect = Rect2(area.position * 3.0, area.size * 3.0)
+	var counter_area := Rect2(area.position.x, SHOP_COUNTER_Y, area.size.x, area.end.y - SHOP_COUNTER_Y)
+	shop_counter.position = counter_area.position
+	shop_counter.region_rect = Rect2(counter_area.position * 3.0, counter_area.size * 3.0)
 
 
 # ───── 房间（等人） ─────
@@ -809,44 +837,18 @@ func _build_shop() -> void:
 	shop.size = size
 	shop.mouse_filter = Control.MOUSE_FILTER_STOP
 	add_child(shop)
-	var bg := ColorRect.new()
-	bg.size = size
-	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	shop_bg = ShaderMaterial.new()
-	shop_bg.shader = SHOP_BG
-	bg.material = shop_bg
-	shop.add_child(bg)
-	# 有店内的背景图（art/shop_bg.png，画法见 素材清单.md）就用图，没有就用上面程序画的后墙、货架、柜台
-	var has_pic := ResourceLoader.exists("res://art/shop_bg.png")
-	if has_pic:
-		var pic := TextureRect.new()
-		pic.texture = load("res://art/shop_bg.png")
-		pic.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		pic.stretch_mode = TextureRect.STRETCH_SCALE
-		pic.size = size
-		pic.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		shop.add_child(pic)
+	shop_bg = _screen_bg(preload("res://art/shop_bg.png"))
+	shop.add_child(shop_bg)
 	# 掌柜：身后一团暖光，人站在柜台后面（脚被柜台挡住）
 	shop_halo = _halo(Color(1.0, 0.72, 0.36, 0.55), Rect2(-36, 70, 250, 250))
 	shop.add_child(shop_halo)
 	shop_face = _pic("res://art/keeper_neutral.png", Vector2(172, 176))
-	shop_face.position = Vector2(4, 120)
+	shop_face.position = Vector2(0, SHOP_FACE_Y)
 	shop_face.size = Vector2(172, 176)
 	shop.add_child(shop_face)
-	var edge := ColorRect.new()                 # 柜台的台面边，盖在掌柜身上
-	edge.color = Color(0.5, 0.33, 0.17)
-	edge.position = Vector2(0, 290)
-	edge.size = Vector2(640, 3)
-	edge.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	edge.visible = not has_pic
-	shop.add_child(edge)
-	var edge2 := ColorRect.new()
-	edge2.color = Color(0.16, 0.1, 0.06)
-	edge2.position = Vector2(0, 293)
-	edge2.size = Vector2(640, 2)
-	edge2.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	edge2.visible = not has_pic
-	shop.add_child(edge2)
+	# 原图柜台叠到人和光晕前面，遮住落在台面以下的部分。
+	shop_counter = _screen_bg(shop_bg.texture)
+	shop.add_child(shop_counter)
 	# 左上：店名和第几关
 	shop_head = _title("矿货商店", 24)
 	shop_head.position = Vector2(16, 8)
@@ -864,8 +866,8 @@ func _build_shop() -> void:
 	shop.add_child(shop_seats)
 	# 掌柜说的话：一块小面板，贴着他的头
 	var bubble := Control.new()
-	bubble.position = Vector2(170, 40)
-	bubble.size = Vector2(454, 38)
+	bubble.position = Vector2(180, 40)
+	bubble.size = Vector2(444, 38)
 	bubble.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var bb := ColorRect.new()
 	bb.position = Vector2(-PAD, -PAD)
@@ -881,13 +883,13 @@ func _build_shop() -> void:
 	shop_say = _l("", 12, CREAM)
 	shop_say.autowrap_mode = TextServer.AUTOWRAP_ARBITRARY
 	shop_say.position = Vector2(10, 5)
-	shop_say.size = Vector2(434, 30)
+	shop_say.size = Vector2(424, 30)
 	bubble.add_child(shop_say)
 	shop.add_child(bubble)
 	# 货架上的货（每次进店重新摆）
 	shop_items = Control.new()
-	shop_items.position = Vector2(176, 88)
-	shop_items.size = Vector2(448, 134)
+	shop_items.position = Vector2(220, 96)
+	shop_items.size = Vector2(420, 134)
 	shop_items.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	shop.add_child(shop_items)
 	shop_desc = _l("", 12, CREAM)
@@ -914,15 +916,18 @@ func _build_shop() -> void:
 	shop_bar.position = Vector2(18, 304)
 	shop_bar.size = Vector2(130, 5)
 	shop.add_child(shop_bar)
-	shop_mood = _l("", 12, DIM)
+	shop_mood = _l("", 12, CREAM)
+	_outline(shop_mood)
 	shop_mood.position = Vector2(18, 312)
 	shop_mood.size = Vector2(150, 14)
 	shop.add_child(shop_mood)
 	shop_info = _l("", 12, GOLD)
+	_outline(shop_info)
 	shop_info.position = Vector2(180, 298)
 	shop_info.size = Vector2(310, 14)
 	shop.add_child(shop_info)
-	shop_own = _l("", 12, DIM)
+	shop_own = _l("", 12, CREAM)
+	_outline(shop_own)
 	shop_own.position = Vector2(180, 313)
 	shop_own.size = Vector2(310, 14)
 	shop_own.clip_text = true
@@ -992,30 +997,31 @@ func _send_say() -> void:
 func _make_card(k: String, x: float, index: int) -> Dictionary:
 	var card := Control.new()
 	card.position = Vector2(x, 0)
-	card.size = Vector2(86, 134)
+	card.size = Vector2(SHOP_CARD_WIDTH, 130)
 	card.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var halo := _halo(Color(1.0, 0.8, 0.42, 0.0), Rect2(-7, 20, 100, 100))
+	var halo := _halo(Color(1.0, 0.8, 0.42, 0.0), Rect2(-8, 20, 100, 100))
 	card.add_child(halo)
 	var icon := _pic("res://art/icon_%s.png" % k, Vector2(64, 64))
-	icon.position = Vector2(11, 44)
 	icon.size = Vector2(64, 64)
-	icon.pivot_offset = Vector2(32, 60)          # 以底边为轴放大，像从架子上"冒出来"
+	var bottom := 56.5 if k == "polish" else 58.5   # 透明边不同，底边按主体像素计算
+	icon.position = Vector2(10, SHOP_SHELF_Y - shop_items.position.y - bottom)
+	icon.pivot_offset = Vector2(32, bottom)    # 指到货物时，以贴着搁板的底边为轴放大
 	card.add_child(icon)
 	var name_l := _l(String(Cfg.b().SHOP[k].n), 12, CREAM)
 	_outline(name_l, 3)
-	name_l.position = Vector2(-10, 24)
+	name_l.position = Vector2(-11, 24)
 	name_l.size = Vector2(106, 14)
 	name_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	card.add_child(name_l)
 	var tag := _l("", 12, BAD)
 	_outline(tag, 3)
-	tag.position = Vector2(-10, 8)
+	tag.position = Vector2(-11, 8)
 	tag.size = Vector2(106, 14)
 	tag.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	card.add_child(tag)
 	var price := _l("", 12, GOLD)
 	_outline(price, 3)
-	price.position = Vector2(-20, 117)
+	price.position = Vector2(-21, 116)
 	price.size = Vector2(126, 14)
 	price.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	card.add_child(price)
@@ -1023,7 +1029,7 @@ func _make_card(k: String, x: float, index: int) -> Dictionary:
 	hit.flat = true
 	hit.focus_mode = Control.FOCUS_NONE
 	hit.position = Vector2(0, 20)
-	hit.size = Vector2(86, 112)
+	hit.size = Vector2(SHOP_CARD_WIDTH, 110)
 	for st in ["normal", "hover", "pressed", "focus", "disabled"]:
 		hit.add_theme_stylebox_override(st, StyleBoxEmpty.new())
 	hit.pressed.connect(_pick_item.bind(k))
@@ -1052,10 +1058,9 @@ func _fill_shop() -> void:
 			reg.erase("item_" + k)
 		_clear(shop_items)
 		_cards = {}
-		var gap := 88.0
-		var x0 := (448.0 - gap * keys.size()) * 0.5 + 1.0
+		var x0 := (shop_items.size.x - SHOP_CARD_WIDTH * keys.size()) * 0.5
 		for i in keys.size():
-			_cards[keys[i]] = _make_card(keys[i], x0 + gap * i, i)
+			_cards[keys[i]] = _make_card(keys[i], x0 + SHOP_CARD_WIDTH * i, i)
 		_shop_sel = ""
 		_shop_hover = ""
 	var sig := JSON.stringify([pid, ids, c.pr, c.sale, p.get("ak", {}), p.m, p.tl, p.nx, p.r, int(p.out), _shop_sel, _shop_hover, c.get("ng", 0)])
@@ -1135,6 +1140,7 @@ func refresh() -> void:
 			emo_box.visible = false
 		_last_ph = ph
 	home.visible = ph == ""
+	home_bg.visible = home.visible
 	lobby.visible = ph == "lobby" and not help.visible
 	hud.visible = ph == "play" or ph == "count"
 	rend.visible = ph == "rend"
@@ -1174,9 +1180,8 @@ func _process(dt: float) -> void:
 	elif cl.ph() == "shop":
 		shop_timer.text = "%d 秒后自动下井" % ceili(cl.time_left())
 		var fl := 1.0 + 0.05 * sin(_t * 6.3) + 0.03 * sin(_t * 14.1)        # 店里的灯轻轻摇曳
-		shop_bg.set_shader_parameter("flicker", fl)
 		shop_halo.modulate.a = 0.5 * fl
-		shop_face.position.y = 120.0 + sin(_t * 1.7) * 1.2                  # 掌柜站着轻轻晃
+		shop_face.position.y = SHOP_FACE_Y + sin(_t * 1.7) * 1.2           # 掌柜站着轻轻晃
 		for k in _cards.keys():
 			var cd: Dictionary = _cards[k]
 			var want := 0.0 if _t < float(cd.born) else (1.22 if k == _shop_hover else (1.12 if k == _shop_sel else 1.0))
