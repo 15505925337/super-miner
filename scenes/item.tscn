@@ -38,6 +38,10 @@ texture = SubResource("halo_texture")
 
 [node name="Sprite" type="Sprite2D" parent="."]
 
+[node name="Rim" type="Sprite2D" parent="Sprite"]
+visible = false
+show_behind_parent = true
+
 [node name="Glow" type="Sprite2D" parent="."]
 visible = false
 material = ExtResource("3")

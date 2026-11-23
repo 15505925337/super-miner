@@ -51,6 +51,7 @@ const TIERS := [
 	{   # 岩石层：两盏矿灯打下暖光，井壁是冷色的碎裂岩块
 		"bg": "bg_2", "grade": Vector3.ONE, "bag_chest_glow": 1.85, "bloom": 0.06,
 		"ledge": 233.0,
+		"miner_shadow_height": 4.0, "miner_shadow_distance": 1.2,   # 岩石台沿窄，软影收在台沿附近
 		"light_dir": Vector2(0.28, 0.96), "light_col": Color(1.0, 0.78, 0.52),
 		"lamps": [Vector2(81, 51), Vector2(403, 51)], "beam": 0.46,
 		"rim": {"fos": 0.5, "rs": 0.4, "rl": 0.4}, "dust": Color(1, 0.92, 0.78),
@@ -266,7 +267,6 @@ func _make_miner(c: int) -> Dictionary:
 	var shadow := Sprite2D.new()
 	shadow.texture = SOFT_SHADOW
 	shadow.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
-	shadow.scale = Vector2(42.0, 3.5) / SOFT_SHADOW.get_size()
 	shadow.z_index = -1
 	root.add_child(shadow)
 	var ice := Sprite2D.new()
@@ -325,17 +325,18 @@ func _set_item_lighting(n: Node2D) -> void:
 func _set_item_look(n: Node2D) -> void:
 	var conf: Dictionary = TIERS[_tier]
 	var detail := _lit()
-	var levels: Vector2 = Cfg.GLOW.get(n.kind, Vector2.ZERO)
-	var dark_glow := levels.y
+	var dark_glow := float(Cfg.DARK_GLOW.get(n.kind, 0.0))
 	if n.kind in ["bag", "chest"]:
 		dark_glow *= float(conf.bag_chest_glow)
 	var rim_strength := float(conf.rim.get(n.kind, 0.20))
-	n.set_look(detail, _dark, lerpf(levels.x if detail else 0.0, dark_glow, _dark), rim_strength)
+	n.set_look(detail, _dark, dark_glow * _dark, rim_strength)
 
 
 func _set_miner_shadow(m: Dictionary) -> void:
-	m.shadow.position = MINER_CONTACT + TIERS[_tier].light_dir * 1.35
-	m.shadow.modulate.a = 0.58 * (1.0 - _dark)
+	var conf: Dictionary = TIERS[_tier]
+	m.shadow.position = MINER_CONTACT + conf.light_dir * float(conf.get("miner_shadow_distance", 2.0))
+	m.shadow.scale = Vector2(46.0, float(conf.get("miner_shadow_height", 5.0))) / SOFT_SHADOW.get_size()
+	m.shadow.modulate.a = 0.92 * (1.0 - _dark)
 	m.shadow.visible = _lit() and _dark < 1.0
 
 

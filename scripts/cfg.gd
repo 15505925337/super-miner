@@ -17,12 +17,11 @@ const ART := {
 	"gem": "gem", "rub": "ruby", "bag": "bag", "tnt": "tnt", "bug": "beetle", "fos": "fossil",
 	"key": "key", "chest": "chest",
 }
-# 自发光的叠加比例（常态、全黑）。宝袋和宝箱沿用原来的分层黑灯倍率。
-const GLOW := {
-	"gs": Vector2(0.024, 0.58), "gm": Vector2(0.0216, 0.53),
-	"gl": Vector2(0.0192, 0.48), "gx": Vector2(0.0192, 0.48),
-	"gem": Vector2(0.15, 0.77), "rub": Vector2(0.14, 0.77), "bug": Vector2(0.16, 0.77),
-	"key": Vector2(0.06, 0.76), "bag": Vector2(0.0168, 0.14), "chest": Vector2(0.0264, 0.22),
+# 全黑时贴图自发光的叠加比例。宝袋和宝箱另乘各层的黑灯倍率。
+const DARK_GLOW := {
+	"gs": 0.58, "gm": 0.53, "gl": 0.48, "gx": 0.48,
+	"gem": 0.77, "rub": 0.77, "bug": 0.77,
+	"key": 0.76, "bag": 0.14, "chest": 0.22,
 }
 const GOLD := ["gs", "gm", "gl", "gx"]
 # 这些东西画的时候各带一个固定的倾斜角度（照原型）

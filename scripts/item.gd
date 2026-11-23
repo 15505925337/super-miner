@@ -2,7 +2,7 @@
 extends Node2D
 
 const Cfg = preload("res://scripts/cfg.gd")
-const SPRITE_SHADER := preload("res://shaders/sprite.gdshader")
+const RIM_SHADER := preload("res://shaders/sprite.gdshader")
 const SWEEP_SHADER := preload("res://shaders/gold_sweep.gdshader")
 const BEETLE_FRAMES := [preload("res://art/beetle.tres"), preload("res://art/beetle_2.tres")]
 const SWEEP_DURATION := 0.4
@@ -29,14 +29,15 @@ var _phase := 0.0
 var _spark_at := 0.0
 var _walk_t := 0.0
 var _walk_frame := 0
-var _mat: ShaderMaterial
+var _rim_mat: ShaderMaterial
 var _sweep_mat: ShaderMaterial
 var _sweep_cycle := 0.0
 var _sweep_offset := 0.0
-var _sweep := Vector2.ZERO
+var _sweep := Vector3.ZERO
 var _halo_color := Color.TRANSPARENT
 
 @onready var sprite: Sprite2D = $Sprite
+@onready var rim: Sprite2D = $Sprite/Rim
 @onready var glow: Sprite2D = $Glow
 @onready var shadow: Sprite2D = $Shadow
 @onready var halo: Sprite2D = $Halo
@@ -51,10 +52,11 @@ func _ready() -> void:
 		if shape != 0:
 			art += "_%d" % shape
 	sprite.texture = load("res://art/%s.tres" % art)
+	rim.texture = sprite.texture
 	glow.texture = sprite.texture
-	_mat = ShaderMaterial.new()
-	_mat.shader = SPRITE_SHADER
-	sprite.material = _mat
+	_rim_mat = ShaderMaterial.new()
+	_rim_mat.shader = RIM_SHADER
+	rim.material = _rim_mat
 	# 照原型的画法：整张图画成边长 = 碰撞半径 × 2.5 的正方形
 	_radius = float(Cfg.b().TYPES[Cfg.type_index(kind)].r) * Cfg.S
 	var d := _radius * 2.5
@@ -62,7 +64,7 @@ func _ready() -> void:
 	sprite.scale = Vector2(sc, sc)
 	glow.scale = sprite.scale
 	# 描边宽度按游戏像素设定，换算成贴图像素。
-	_mat.set_shader_parameter("rim_px", 0.9 / sc)
+	_rim_mat.set_shader_parameter("rim_px", 0.9 / sc)
 	# 金块、石头、化石各自带一个固定的倾斜角度，看着不那么整齐划一
 	if kind in Cfg.TILT:
 		var h := fmod(absf(sin(uid * 12.9898) * 43758.5453), 1.0)
@@ -89,8 +91,8 @@ func set_lighting(light_dir: Vector2, light_col: Color, under_col: Color) -> voi
 	_light_dir = light_dir
 	shadow.position = light_dir * clampf(_radius * 0.25, 1.4, 3.2)
 	spark.modulate = light_col
-	_mat.set_shader_parameter("light_col", light_col)
-	_mat.set_shader_parameter("under_col", under_col)
+	_rim_mat.set_shader_parameter("light_col", light_col)
+	_rim_mat.set_shader_parameter("under_col", under_col)
 	if _sweep_mat != null:
 		_sweep_mat.set_shader_parameter("light_col", light_col)
 	_update_light_axes()
@@ -103,8 +105,8 @@ func _update_light_axes() -> void:
 	if sprite.flip_h:
 		axis.x = -axis.x
 		under.x = -under.x
-	_mat.set_shader_parameter("light_axis", axis)
-	_mat.set_shader_parameter("under_axis", under)
+	_rim_mat.set_shader_parameter("light_axis", axis)
+	_rim_mat.set_shader_parameter("under_axis", under)
 	if _sweep_mat != null:
 		_sweep_mat.set_shader_parameter("sweep_axis", axis / (absf(axis.x) + absf(axis.y)))
 	if kind in Cfg.SPARKLE:
@@ -164,6 +166,7 @@ func _update_walk(dt: float) -> void:
 	if absf(walk_dx) > 0.02:
 		_walk_t += dt
 		sprite.flip_h = walk_dx < 0.0
+		rim.flip_h = sprite.flip_h
 		glow.flip_h = sprite.flip_h
 	else:
 		_walk_t = 0.0
@@ -172,6 +175,7 @@ func _update_walk(dt: float) -> void:
 	if frame_changed:
 		_walk_frame = frame
 		sprite.texture = BEETLE_FRAMES[frame]
+		rim.texture = sprite.texture
 		glow.texture = sprite.texture
 	sprite.position.y = sin(_walk_t * 16.0) * 0.75
 	glow.position.y = sprite.position.y
@@ -182,11 +186,15 @@ func _update_walk(dt: float) -> void:
 
 
 func _update_glow() -> void:
-	var sweep := Vector2.ZERO
+	var sweep := Vector3.ZERO
 	if _detail and _sweep_mat != null:
 		var elapsed := fposmod(_t + _sweep_offset, _sweep_cycle)
 		if elapsed < SWEEP_DURATION:
-			sweep = Vector2(lerpf(-0.095, 1.095, elapsed / SWEEP_DURATION), lerpf(0.24, 0.46, _dark))
+			sweep = Vector3(
+				lerpf(-0.095, 1.095, elapsed / SWEEP_DURATION),
+				lerpf(0.10, 0.46, _dark),
+				lerpf(0.55, 1.0, _dark)
+			)
 	if sweep != _sweep:
 		_sweep = sweep
 		_sweep_mat.set_shader_parameter("sweep", sweep)
@@ -212,5 +220,6 @@ func set_look(detail: bool, dark: float, glow_strength: float, rim_strength: flo
 	if not detail:
 		spark.hide()
 	_update_glow()
-	_mat.set_shader_parameter("rim_strength", rim_strength)
-	_mat.set_shader_parameter("light_fade", 1.0 - dark if detail else 0.0)
+	rim.visible = detail and dark < 1.0
+	_rim_mat.set_shader_parameter("rim_strength", rim_strength)
+	_rim_mat.set_shader_parameter("light_fade", 1.0 - dark)
