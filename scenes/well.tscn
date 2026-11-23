@@ -34,7 +34,7 @@ region_enabled = true
 
 [node name="Emis" type="Sprite2D" parent="."]
 visible = false
-modulate = Color(1, 1, 1, 0.256)
+modulate = Color(1, 1, 1, 0.48)
 z_index = -9
 material = ExtResource("13")
 texture_filter = 2

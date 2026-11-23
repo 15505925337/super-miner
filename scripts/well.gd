@@ -16,7 +16,7 @@ const CHEST_OPEN := preload("res://art/chest_open.png")
 const SHAFT := preload("res://shaders/shaft.gdshader")
 const BG_SHADER := preload("res://shaders/bg.gdshader")
 const LAVA_CRACKS := preload("res://art/relief_3_e.png")
-const LAVA_CRACK_STRENGTH := 0.32
+const LAVA_CRACK_STRENGTH := 0.60
 const DARK_AMBIENT := Color(0.06, 0.06, 0.09)
 const MINER_SIZE := 64.0
 const MINER_SOURCE_SIZE := 512.0
@@ -56,7 +56,7 @@ const FX_SEQUENCES := {
 static var _fx_frames := {}
 
 # 以原画为主。井壁、远景和支架共用同一层的调色，环境光只在黑灯事件里压暗。
-#   grade [伽马, 对比度, 饱和度]；dark_glow 黑灯时值钱矿物的自发光；bloom 泛光强度
+#   grade [伽马, 对比度, 饱和度]；grade_tint 各色通道倍率；dark_glow 黑灯时值钱矿物的自发光；bloom 泛光强度
 #   lights [灯芯位置, 颜色, 光柱（0 没有，1 朝下，2 斜着）]
 #   rim    哪些矿物在这一层和底图颜色太接近，要加描边光；dust 飘尘的颜色
 const TIERS := [
@@ -86,10 +86,12 @@ const TIERS := [
 		"rim": {"gem": Color(0.9, 1, 1, 0.75), "bug": Color(1, 0.92, 1, 0.8), "rub": Color(1, 0.9, 0.92, 0.6), "rs": Color(0.75, 0.82, 1, 0.4), "rl": Color(0.75, 0.82, 1, 0.4)}, "dust": Color(0.6, 0.95, 1),
 	},
 	{   # 熔岩层：井架挂灯，井壁保留原有的岩浆裂缝自发光
-		"bg": "bg_4", "grade": Vector3(1.49, 1.02, 1.06), "dark_glow": 2.9, "bloom": 0.06,
+		"bg": "bg_4", "grade": Vector3(1.34, 1.12, 1.40), "grade_tint": Vector3(1.08, 1.05, 0.60),
+		"dark_glow": 2.9, "bloom": 0.06,
 		"ledge": 216.0,
 		"lights": [[Vector2(151, 37), Color(1, 0.68, 0.36), 1]],
-		"rim": {"rs": Color(0.85, 0.8, 0.85, 0.4), "rl": Color(0.85, 0.8, 0.85, 0.4)}, "dust": Color(1, 0.55, 0.2),
+		"rim": {"rs": Color(0.85, 0.8, 0.85, 0.4), "rl": Color(0.85, 0.8, 0.85, 0.4), "tnt": Color(1.0, 0.76, 0.47, 0.28)},
+		"dust": Color(1, 0.55, 0.2),
 	},
 ]
 
@@ -150,6 +152,7 @@ func _set_tier(tier: int) -> void:
 	foreground.texture = load("res://art/%s_fg.png" % t.bg)
 	bloom = t.bloom
 	bg.material.set_shader_parameter("grade", t.grade)
+	bg.material.set_shader_parameter("grade_tint", t.get("grade_tint", Vector3.ONE))
 	emis.visible = tier == 3 and _show_lava_cracks
 	dust.color = Color(t.dust.r, t.dust.g, t.dust.b, 0.85)
 	embers.emitting = tier == 3

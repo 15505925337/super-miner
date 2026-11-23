@@ -2,12 +2,14 @@
 shader_type canvas_item;
 
 uniform vec3 grade = vec3(1.0);    // 伽马、对比度、饱和度
+uniform vec3 grade_tint = vec3(1.0);    // 调色后的红、绿、蓝通道倍率
 
 void fragment() {
-	if (grade != vec3(1.0)) {
+	if (grade != vec3(1.0) || grade_tint != vec3(1.0)) {
 		vec3 c = pow(COLOR.rgb, vec3(1.0 / grade.x));
 		float l = dot(c, vec3(0.299, 0.587, 0.114));
 		c = mix(vec3(l), c, grade.z);
-		COLOR.rgb = clamp((c - 0.5) * grade.y + 0.5, 0.0, 1.0);
+		c = (c - 0.5) * grade.y + 0.5;
+		COLOR.rgb = clamp(c * grade_tint, 0.0, 1.0);
 	}
 }
