@@ -1,0 +1,10 @@
+# Godot 程序本体（体积大，本机自带，见 export.sh 的 GODOT 变量）
+.tools/
+# Godot 导入缓存，重新导入会生成
+.godot/
+# 导出的网页版，用 ./export.sh 生成
+build/
+# 服务端依赖和日志
+server/node_modules/
+server/logs/
+.DS_Store

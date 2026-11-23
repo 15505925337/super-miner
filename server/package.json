@@ -1,0 +1,14 @@
+{
+  "name": "deep-mine-server",
+  "private": true,
+  "type": "module",
+  "description": "《深井夺金》服务端。Node 24 直接运行 TypeScript，不需要编译，运行时没有第三方依赖。typescript 只在开发时检查类型用（npm run check）。",
+  "scripts": {
+    "start": "node src/main.ts",
+    "test": "node --test \"test/*.test.ts\"",
+    "check": "tsc -p ."
+  },
+  "devDependencies": {
+    "typescript": "6.0.3"
+  }
+}

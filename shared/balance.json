@@ -1,0 +1,100 @@
+{
+  "_说明": "两端共用的数值表。服务端（server/src/core.ts）和 Godot 客户端（scripts/cfg.gd）都读这一份。数值照原型 deep-mine.js 的常量区，长度单位是原型的 1280×720 坐标；客户端画的时候乘 0.5 换成 640×360 的游戏像素。",
+
+  "W": 1280, "H": 720, "SURF": 160, "Y0": 170,
+  "MINL": 46, "AMP": 1.26, "SWING": 1.9,
+  "EXT_V": 620, "RET_V": 860, "HAUL_V": 540,
+  "HOOK_R": 11, "BOOM_R": 125,
+  "ROUND_T": 60, "COUNT_T": 3, "REND_T": 6, "SHOP_T": 45, "MAXP": 4,
+  "STRONG": 1.6, "HELP": 0.9,
+
+  "TYPES": [
+    { "k": "gs",  "n": "小金块",   "r": 15, "v": 50,   "w": 1.5 },
+    { "k": "gm",  "n": "金块",     "r": 25, "v": 150,  "w": 2.7 },
+    { "k": "gl",  "n": "大金块",   "r": 42, "v": 500,  "w": 5.2 },
+    { "k": "rs",  "n": "碎石",     "r": 19, "v": 11,   "w": 3.2 },
+    { "k": "rl",  "n": "巨石",     "r": 35, "v": 20,   "w": 6.5 },
+    { "k": "gem", "n": "晶石",     "r": 13, "v": 600,  "w": 1.1 },
+    { "k": "bag", "n": "宝袋",     "r": 19, "v": 0,    "w": 2.2 },
+    { "k": "tnt", "n": "炸药桶",   "r": 20, "v": 0,    "w": 1 },
+    { "k": "bug", "n": "晶甲虫",   "r": 15, "v": 700,  "w": 1.1 },
+    { "k": "fos", "n": "化石",     "r": 23, "v": 250,  "w": 3 },
+    { "k": "rub", "n": "红宝石",   "r": 13, "v": 900,  "w": 1.2 },
+    { "k": "gx",  "n": "巨型金块", "r": 54, "v": 1000, "w": 8 },
+    { "k": "key", "n": "钥匙",     "r": 14, "v": 50,   "w": 1 },
+    { "k": "chest", "n": "宝箱",   "r": 26, "v": 500,  "w": 6 }
+  ],
+
+  "SHOP": {
+    "d":      { "n": "炸药",     "price": 120, "tool": 1, "d": "拉到不想要的东西时用，炸掉它马上收钩" },
+    "s":      { "n": "剪刀",     "price": 180, "tool": 1, "only": ["vs", "race"], "d": "剪断对手的绳子：谁在拉最值钱的货就剪谁，货掉在原地" },
+    "f":      { "n": "冰冻",     "price": 200, "tool": 1, "only": ["vs", "race"], "d": "所有对手的钩子冻住 3 秒" },
+    "h":      { "n": "沙漏",     "price": 200, "tool": 1, "only": ["co"], "d": "本关时间 +8 秒" },
+    "drink":  { "n": "大力饮料", "price": 260, "d": "下一局拉货速度 ×1.6" },
+    "clover": { "n": "幸运草",   "price": 140, "d": "下一局宝袋必出好东西" },
+    "polish": { "n": "抛光布",   "price": 200, "d": "下一局晶石、红宝石、晶甲虫价值 ×1.5" },
+    "book":   { "n": "石头图鉴", "price": 50,  "d": "下一局石头价值 ×5" }
+  },
+
+  "MODES": ["co", "vs", "race"],
+  "MODE_NAMES": { "co": "合作联机", "vs": "同屏对战", "race": "分屏对战" },
+  "TOOL_ORDER": { "vs": ["d", "s", "f"], "race": ["d", "s", "f"], "co": ["d", "h"] },
+  "LAYERS": ["浅土层", "岩石层", "晶洞层", "熔岩层"],
+  "BOT_NAMES": ["阿铁", "小钨", "老铜", "锡宝"],
+
+  "GOAL": { "base": 250, "perPlayer": 350, "growth": 0.55 },
+
+  "RULES": {
+    "fireAngleTolerance": 0.45,
+    "toolMax": 5,
+    "startTools": { "d": 1, "s": 0, "f": 0, "h": 0 },
+    "freezeSecs": 3,
+    "hourglassSecs": 8,
+    "dynamiteBoomR": 50,
+    "chainBoomDelay": 0.14,
+    "vsAssistShare": 0.3,
+    "coAssistBonus": 1.1,
+    "polishMul": 1.5,
+    "bookMul": 5,
+    "itemGrabDepth": 0.7,
+    "emptyRoomSecs": 30,
+    "maxRooms": 200
+  },
+
+  "_FUN说明": "第三期（联机乐趣）加的规则数字。race 分屏互相干扰和淘汰后捣乱；coop 合作必须配合的东西；events 随机事件；emotes 快捷喊话。",
+  "FUN": {
+    "race": { "comboLead": 3, "comboBehind": 2, "rockCap": 4, "ghostFirst": 3, "ghostCd": 12, "ghostCap": 5 },
+    "coop": { "minPlayers": 2, "giantWait": 6, "giant": 1, "lessBigGold": 1 },
+    "emotes": ["哈哈哈", "漂亮！", "好险", "帮帮我", "别抢我的", "等等我"],
+    "emoteCd": 2,
+    "events": {
+      "firstRound": 2, "chance": 0.7,
+      "rain": { "n": "金矿雨", "at": 12, "gs": 6, "gm": 2, "d": "过一会儿天上掉金块" },
+      "cave": { "n": "塌方",   "at": 18, "rs": 3, "rl": 2, "d": "过一会儿掉下来一堆石头" },
+      "dark": { "n": "黑灯",   "at": 10, "secs": 15, "d": "过一会儿灯灭掉，只看得见灯照到的地方" }
+    }
+  },
+
+  "BAG": {
+    "weightMin": 1.3, "weightSpan": 2.9,
+    "clover": { "moneyChance": 0.6, "moneyMin": 350, "moneyMax": 800, "elseMoney": 100 },
+    "moneyBelow": 0.55, "moneyMin": 60, "moneyMax": 450,
+    "toolBelow": 0.75,
+    "strongBelow": 0.9,
+    "emptyMoney": 5
+  },
+
+  "KEEPER": {
+    "stockMin": 4, "stockMax": 5, "stockAlways": ["d"],
+    "priceMin": 0.85, "priceSpan": 0.4,
+    "saleMul": 0.7,
+    "floorMin": 0.58, "floorSpan": 0.2,
+    "moodMin": 55, "moodSpan": 25,
+    "maxTries": 4,
+    "moodUpCap": 25, "moodStepMax": 15, "moodStepMin": -30,
+    "lowballBelowFloor": 0.6,
+    "quickAcceptAtAsk": 0.88,
+    "spamMs": 350,
+    "sayMax": 90
+  }
+}

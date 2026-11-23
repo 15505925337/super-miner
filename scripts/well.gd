@@ -1,0 +1,484 @@
+# 一口井（只负责画）：底图、点缀的灯光、矿工、钩子、矿物、飘字。
+# 画什么全听 set_view() 传进来的内容，那是客户端按服务端状态插值算出来的。
+# 合作、同屏对战只有一口井，铺满屏幕；分屏对战每人一口，各画在自己的小窗里。
+# 名字、钱、关数这些字不画在这里，由界面层按屏幕分辨率画（缩放后字才清楚）。
+extends Node2D
+
+const Cfg = preload("res://scripts/cfg.gd")
+const ITEM := preload("res://scenes/item.tscn")
+const HOOK := preload("res://scenes/hook.tscn")
+const LIGHT_TEX := preload("res://res/light_radial.tres")
+const HALO := preload("res://res/halo.tres")
+const MAT_ADD := preload("res://res/mat_add.tres")
+const MAT_UNSHADED := preload("res://res/mat_unshaded.tres")
+const SHAFT := preload("res://shaders/shaft.gdshader")
+const BG_SHADER := preload("res://shaders/bg.gdshader")
+
+# 明暗对比（用户定的，要有反差感）。做法：
+#   环境光压得比较低、偏冷；真的灯放在底图里画着光源的位置，偏暖、够亮；
+#   井壁叠了程序生成的质地和凹凸（tools/gen_relief.mjs），灯照上去岩块有受光面和背光面，光柱一直打进井里。
+#   amb    环境光：没被灯照到的地方保留多少亮度（颜色偏冷）
+#   deep   井底的底图再压到多少（地面线以上基本不压）
+#   glow   矿物的自发光：保证最暗处也分得清
+#   bloom  泛光强度
+#   detail 井壁明暗细节叠多重；bump 凹凸多强；emis 井壁自己发光的部分（矿脉、岩浆裂缝）多亮
+#   lights [位置, 颜色, 强度, 范围, 光柱（0 没有，1 直着往下，2 斜着），离井壁的高度]
+#   rim    哪些矿物在这一层和底图颜色太接近，要加描边光；dust 飘尘的颜色
+const TIERS := [
+	{   # 浅土层：晴天的地面，阳光从左上斜着照进土里，往下渐暗
+		"bg": "bg_1", "amb": Color(0.5, 0.47, 0.5), "deep": 0.62, "glow": 0.3, "bloom": 0.24, "detail": 0.42, "bump": 1.0, "emis": 0.0,
+		"lights": [[Vector2(60, 40), Color(1, 0.9, 0.68), 1.15, 3.6, 2, 50.0], [Vector2(560, 60), Color(1, 0.86, 0.6), 0.5, 2.4, 0, 46.0]],
+		"rim": {"fos": Color(0.3, 0.17, 0.09, 0.7)}, "dust": Color(1, 0.95, 0.8),
+	},
+	{   # 岩石层：矿灯的暖光从上面打下来，右上一束冷色天光，井壁是碎裂的岩块
+		"bg": "bg_2", "amb": Color(0.33, 0.38, 0.56), "deep": 0.62, "glow": 0.45, "bloom": 0.28, "detail": 0.42, "bump": 1.1, "emis": 0.7,
+		"lights": [[Vector2(360, 26), Color(1, 0.7, 0.38), 1.3, 2.3, 1, 46.0], [Vector2(522, 26), Color(1, 0.7, 0.38), 1.1, 2.2, 0, 46.0], [Vector2(612, 14), Color(0.55, 0.82, 1), 0.75, 2.6, 2, 54.0], [Vector2(50, 26), Color(1, 0.7, 0.38), 1.2, 2.1, 1, 46.0]],
+		"rim": {"fos": Color(1, 0.92, 0.75, 0.5), "rs": Color(0.75, 0.82, 0.95, 0.4), "rl": Color(0.75, 0.82, 0.95, 0.4)}, "dust": Color(1, 0.92, 0.78),
+	},
+	{   # 晶洞层：晶体的青光和紫光，井壁是竖长的晶面，裂缝里有发光的矿脉
+		"bg": "bg_3", "amb": Color(0.34, 0.34, 0.6), "deep": 0.62, "glow": 0.55, "bloom": 0.36, "detail": 0.4, "bump": 1.2, "emis": 0.9,
+		"lights": [[Vector2(400, 40), Color(0.4, 0.95, 1), 1.3, 2.4, 2, 44.0], [Vector2(533, 44), Color(0.4, 0.95, 1), 1.2, 2.2, 0, 44.0], [Vector2(14, 64), Color(0.8, 0.55, 1), 1.3, 2.2, 0, 44.0], [Vector2(230, 34), Color(0.5, 0.7, 1), 0.9, 2.0, 2, 44.0]],
+		"rim": {"gem": Color(0.9, 1, 1, 0.75), "bug": Color(1, 0.92, 1, 0.8), "rub": Color(1, 0.9, 0.92, 0.6), "rs": Color(0.75, 0.82, 1, 0.4), "rl": Color(0.75, 0.82, 1, 0.4)}, "dust": Color(0.6, 0.95, 1),
+	},
+	{   # 熔岩层：上面一盏矿灯，光主要从下面来——裂缝里的岩浆和井底的红光
+		"bg": "bg_4", "amb": Color(0.4, 0.32, 0.36), "deep": 0.8, "glow": 0.8, "bloom": 0.44, "detail": 0.45, "bump": 1.2, "emis": 1.0,
+		"lights": [[Vector2(147, 36), Color(1, 0.68, 0.36), 1.5, 2.2, 1, 42.0], [Vector2(20, 350), Color(1, 0.34, 0.12), 1.7, 3.0, 0, 30.0], [Vector2(620, 352), Color(1, 0.34, 0.12), 1.7, 3.0, 0, 30.0], [Vector2(320, 392), Color(1, 0.3, 0.1), 1.3, 3.4, 0, 30.0]],
+		"rim": {"rs": Color(0.85, 0.8, 0.85, 0.4), "rl": Color(0.85, 0.8, 0.85, 0.4)}, "dust": Color(1, 0.55, 0.2),
+	},
+]
+
+var quality: int = Cfg.Q.HIGH
+var fx_on := true
+var bloom := 0.36                # 当前层要的泛光强度，主场景来读
+var _k := 1.0
+var _items := {}                 # 物件 id → 节点
+var _miners := {}                # 玩家 id → { root, sprite, hook, frames, c }
+var _extra: Array[PointLight2D] = []
+var _t := 0.0
+var _tier := -1
+var _layers := {}                # 纵深的图层：far / frame / fg，有图才建
+var _base := Vector2.ZERO         # 这口井在画面上的位置（震动是在它上面加一点偏移）
+var _shake := 0.0                 # 震动的幅度（游戏像素），自己衰减
+var _dark := 0.0                  # 黑灯的程度，0 正常，1 全黑（只剩钩灯、头灯和会发光的东西）
+var _dark_want := 0.0
+var _dark_done := 0.0
+var _live_t := -1.0               # 这一关是从什么时候开始挖的（中途冒出来的东西要有个"掉下来"的动作）
+var _emis := 0.0
+
+@onready var ambient: CanvasModulate = $Ambient
+@onready var bg: Sprite2D = $Bg
+@onready var lights_root: Node2D = $Lights
+@onready var items_root: Node2D = $Items
+@onready var miners_root: Node2D = $Miners
+@onready var fx_root: Node2D = $Fx
+@onready var dust: CPUParticles2D = $Dust
+@onready var emis: Sprite2D = $Emis
+@onready var embers: CPUParticles2D = $Embers
+@onready var low_light: ColorRect = $LowLight
+
+
+func _ready() -> void:
+	low_light.material = low_light.material.duplicate()      # 每口井各用一份，不然分屏时几口井会互相盖掉
+	low_light.material.set_shader_parameter("origin", low_light.position)
+	var bm := ShaderMaterial.new()
+	bm.shader = BG_SHADER
+	bg.material = bm
+	_set_tier(1)
+	apply(quality, fx_on)
+
+
+func _lit() -> bool:
+	return fx_on and quality != Cfg.Q.LOW
+
+
+func _set_tier(tier: int) -> void:
+	_tier = tier
+	var t: Dictionary = TIERS[tier]
+	bg.texture = load("res://art/%s.png" % t.bg)
+	ambient.color = t.amb
+	bloom = t.bloom
+	var bm: ShaderMaterial = bg.material
+	bm.set_shader_parameter("deep_mul", t.deep)
+	bm.set_shader_parameter("relief", load("res://art/relief_%d.png" % tier))
+	bm.set_shader_parameter("relief_n", load("res://art/relief_%d_n.png" % tier))
+	bm.set_shader_parameter("detail", t.detail)
+	bm.set_shader_parameter("bump", t.bump)
+	emis.texture = load("res://art/relief_%d_e.png" % tier)
+	_emis = t.emis
+	# 纵深的三层图：远景后墙、支架层、前景剪影（文件名和画法见 素材清单.md）。有图用图，没图照旧。
+	# 现在只是按位置叠上去；分层移动（视差）和前后景虚化放在画面收尾里做，到时灯的位置也要按新图重新对
+	for d in [["far", -8], ["frame", -7], ["fg", 62]]:
+		var path := "res://art/%s_%s.png" % [t.bg, d[0]]
+		var has := ResourceLoader.exists(path)
+		if not has and not _layers.has(d[0]):
+			continue
+		if not _layers.has(d[0]):
+			var s := Sprite2D.new()
+			s.centered = false
+			s.scale = Vector2.ONE / 3.0
+			s.z_index = d[1]
+			s.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+			if d[0] == "far":                     # 远景只盖住地面线以上那一条
+				s.region_enabled = true
+				s.region_rect = Rect2(0, 0, 1920, 240)
+			if d[0] == "fg":                      # 前景剪影不吃灯光
+				var m := CanvasItemMaterial.new()
+				m.light_mode = CanvasItemMaterial.LIGHT_MODE_UNSHADED
+				s.material = m
+			add_child(s)
+			_layers[d[0]] = s
+		_layers[d[0]].visible = has
+		if has:
+			_layers[d[0]].texture = load(path)
+	dust.color = Color(t.dust.r, t.dust.g, t.dust.b, 0.85)
+	embers.emitting = tier == 3
+	embers.visible = tier == 3 and fx_on
+	for c in lights_root.get_children():
+		c.queue_free()
+	for l in t.lights:
+		var node := Node2D.new()
+		node.position = l[0]
+		var pl := PointLight2D.new()
+		pl.texture = LIGHT_TEX
+		pl.color = l[1]
+		pl.energy = l[2]
+		pl.texture_scale = l[3]
+		pl.height = l[5]
+		pl.set_meta("e0", l[2])
+		node.add_child(pl)
+		var halo := Sprite2D.new()
+		halo.texture = HALO
+		halo.material = MAT_ADD
+		halo.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+		halo.z_index = 45
+		halo.scale = Vector2.ONE * 0.6
+		halo.modulate = Color(l[1].r, l[1].g, l[1].b, 0.38)
+		node.add_child(halo)
+		if int(l[4]) > 0:                         # 一束光柱，一直打进井里；斜的那种像从缝里漏下来的天光
+			var shaft := ColorRect.new()
+			var m := ShaderMaterial.new()
+			m.shader = SHAFT
+			m.set_shader_parameter("strength", 0.26)
+			m.set_shader_parameter("tint", Color(l[1].r, l[1].g, l[1].b, 1.0))
+			m.set_shader_parameter("seed", l[0].x * 0.01)
+			m.set_shader_parameter("half_angle", 0.46 if int(l[4]) == 1 else 0.3)
+			shaft.material = m
+			shaft.position = Vector2(-170, 2)
+			shaft.size = Vector2(340, 340)
+			shaft.pivot_offset = Vector2(170, 0)
+			if int(l[4]) == 2:
+				shaft.rotation = 0.5 if l[0].x < 320.0 else -0.42
+			shaft.z_index = 44
+			shaft.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			node.add_child(shaft)
+		lights_root.add_child(node)
+	_fix_lights(lights_root)
+	apply(quality, fx_on)
+
+
+# items：[{id, t, x, y, by}]，坐标是服务端单位。players：[{id, c, x, ang, len, st, fz, sg, out, frame}]
+# info：{live, tier}
+func set_view(items: Array, players: Array, info: Dictionary) -> void:
+	var tier := int(info.get("tier", 1))
+	if tier != _tier:
+		_set_tier(tier)
+	var live: bool = info.get("live", false)
+	var conf: Dictionary = TIERS[_tier]
+	_dark_want = float(info.get("dark", 0.0)) if live else 0.0
+	if not live:
+		_live_t = -1.0
+	elif _live_t < 0.0:
+		_live_t = _t
+	var seen := {}
+	for it in items:
+		var id := int(it.id)
+		seen[id] = true
+		var n: Node2D = _items.get(id)
+		if n == null:
+			n = ITEM.instantiate()
+			n.kind = Cfg.type_key(it.t)
+			n.uid = id
+			items_root.add_child(n)
+			n.set_look(fx_on, _lit(), _glow_for(n.kind), conf.rim.get(n.kind, Color(1, 1, 1, 0)))
+			_fix_lights(n)
+			_items[id] = n
+			if live and _live_t >= 0.0 and _t - _live_t > 0.6:     # 开挖以后才冒出来的（丢来的石头、金矿雨、塌方）：从小变大弹一下
+				n.scale = Vector2.ONE * 0.15
+				n.create_tween().tween_property(n, "scale", Vector2.ONE, 0.32).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+				fx_boom(Vector2(it.x, it.y) * Cfg.S, 26.0, Color(0.8, 0.72, 0.6), 0.3)
+		n.position = Vector2(it.x, it.y) * Cfg.S
+		n.modulate.a = 1.0 if live else 0.6
+	for id in _items.keys():
+		if not seen.has(id):
+			_items[id].queue_free()
+			_items.erase(id)
+
+	seen = {}
+	var y0: float = float(Cfg.b().Y0) * Cfg.S
+	var surf: float = float(Cfg.b().SURF) * Cfg.S
+	for p in players:
+		var id := int(p.id)
+		seen[id] = true
+		var m: Dictionary = _miners.get(id, {})
+		if m.is_empty():
+			m = _make_miner(int(p.c))
+			_miners[id] = m
+		var x: float = float(p.x) * Cfg.S
+		var st := int(p.st)
+		var hauling := st == 2 or st == 4
+		var frame := String(p.get("frame", "idle"))
+		m.sprite.texture = m.frames[frame]
+		# 照原型：整张图画成 64×64（游戏像素），底边在地面线下 3
+		var bob := sin(_t * 15.0) * 0.6 if hauling else sin(_t * 2.3 + int(p.c) * 2.0) * 0.35
+		var hop := -absf(sin(float(p.get("joy", 0.0)) * PI)) * 3.5
+		m.root.position = Vector2(x, surf - 29.0 + hop + (bob if hauling else 0.0))
+		m.sprite.modulate = Color(0.75, 0.95, 1.0) if int(p.fz) == 1 else Color(1, 1, 1)
+		m.hook.position = Vector2(x, y0)
+		m.hook.apply(float(p.ang), float(p.len) * Cfg.S, hauling, int(p.fz) == 1, int(p.sg) == 1)
+		var gone: bool = int(p.get("out", 0)) == 1
+		m.root.modulate.a = 0.4 if (gone or not bool(p.get("on", true))) else 1.0
+		m.hook.visible = not gone
+	for id in _miners.keys():
+		if not seen.has(id):
+			_miners[id].root.queue_free()
+			_miners[id].hook.queue_free()
+			_miners.erase(id)
+
+
+func _make_miner(c: int) -> Dictionary:
+	var root := Node2D.new()
+	miners_root.add_child(root)
+	var base := "res://art/miner_%d" % (c % 4 + 1)
+	var frames := {"idle": load(base + ".tres"), "pull": load(base + "_pull.tres"), "happy": load(base + "_happy.tres")}
+	var sprite := Sprite2D.new()
+	sprite.texture = frames.idle
+	sprite.scale = Vector2.ONE * 64.0 / float(frames.idle.get_width())
+	root.add_child(sprite)
+	var head := PointLight2D.new()                # 头灯：照亮矿工自己和脚下一小块
+	head.texture = LIGHT_TEX
+	head.texture_scale = 0.5
+	head.position = Vector2(-14, -8)
+	head.color = Color(1, 0.9, 0.7)
+	head.energy = 0.3
+	head.height = 20.0
+	head.enabled = _lit()
+	root.add_child(head)
+	var hook: Node2D = HOOK.instantiate()
+	miners_root.add_child(hook)
+	hook.set_fx(fx_on, _lit())
+	_fix_lights(root)
+	_fix_lights(hook)
+	return {"root": root, "sprite": sprite, "hook": hook, "frames": frames, "c": c, "head": head}
+
+
+func miner_pos(id: int) -> Vector2:
+	var m: Dictionary = _miners.get(id, {})
+	return m.root.position if not m.is_empty() else Vector2(320, 51)
+
+
+# 这口井在画面上的位置；震一下（幅度是游戏像素，取大的那个）
+func set_base(p: Vector2) -> void:
+	_base = p
+	position = p
+
+
+func shake(amount: float) -> void:
+	if fx_on:
+		_shake = maxf(_shake, amount)
+
+
+# 一件东西自己的微光有多亮。黑灯的时候值钱的东西调亮（不能完全看不见）；石头和炸药桶不调，藏在黑里，这就是黑灯的坑
+func _glow_for(kind: String) -> float:
+	var conf: Dictionary = TIERS[maxi(_tier, 0)]
+	if kind in ["rs", "rl", "tnt"]:
+		return float(conf.glow) * (1.0 - 0.6 * _dark)
+	return float(conf.glow) * (1.0 + 2.0 * _dark) + 0.5 * _dark
+
+
+# 黑灯：环境光几乎压没，画里的灯暗下去，钩灯和头灯变亮，所有东西自己的微光调高（值钱的东西不能完全看不见）
+func _apply_dark() -> void:
+	var conf: Dictionary = TIERS[maxi(_tier, 0)]
+	var d := _dark
+	_dark_done = d
+	var amb: Color = conf.amb
+	ambient.color = amb.lerp(Color(amb.r * 0.1, amb.g * 0.1, amb.b * 0.15), d)
+	if fx_on:
+		bg.material.set_shader_parameter("deep_mul", float(conf.deep) * (1.0 - 0.55 * d))
+		bg.material.set_shader_parameter("top_mul", 0.95 * (1.0 - 0.6 * d))
+	for n in lights_root.get_children():
+		n.modulate.a = 1.0 - 0.85 * d
+	for n in _items.values():
+		n.set_look(fx_on, _lit(), _glow_for(n.kind), conf.rim.get(n.kind, Color(1, 1, 1, 0)))
+	for m in _miners.values():
+		m.hook.set_dark(d)
+		m.head.energy = 0.3 + 0.5 * d
+
+
+# 钩中时钩尖上闪一下
+func fx_hit(pos: Vector2, strong: bool) -> void:
+	fx_boom(pos, 30.0 if strong else 20.0, Color(1.0, 0.95, 0.8) if strong else Color(0.8, 0.8, 0.85), 0.16)
+
+
+# 飘字：从某个位置往上飘、淡出
+func fx_text(pos: Vector2, text: String, color: Color = Color(1, 0.88, 0.29), size_mul: float = 1.0) -> void:
+	var l := Label.new()
+	l.material = MAT_UNSHADED
+	l.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	if Cfg.font() != null:
+		l.add_theme_font_override("font", Cfg.font())
+	l.add_theme_font_size_override("font_size", roundi(24 * size_mul))
+	l.add_theme_color_override("font_color", color)
+	l.add_theme_color_override("font_outline_color", Color(0.2, 0.1, 0.05))
+	l.add_theme_constant_override("outline_size", 6)
+	l.scale = Vector2(0.5, 0.5)                   # 字按两倍大小画再缩一半，放大后不糊
+	l.size = Vector2(320, 30)
+	l.position = pos + Vector2(-80, -8)
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l.text = text
+	fx_root.add_child(l)
+	var tw := l.create_tween()
+	tw.set_parallel(true)
+	tw.tween_property(l, "position:y", l.position.y - 26.0, 1.2)
+	tw.tween_property(l, "modulate:a", 0.0, 1.2).set_ease(Tween.EASE_IN)
+	tw.chain().tween_callback(l.queue_free)
+
+
+# 爆炸：一团亮光迅速扩大再消失
+func fx_boom(pos: Vector2, radius: float, color: Color = Color(1, 0.75, 0.35), dur: float = 0.4) -> void:
+	for pass_i in 2:
+		var s := Sprite2D.new()
+		s.texture = HALO
+		s.material = MAT_ADD
+		s.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+		s.position = pos
+		s.modulate = color if pass_i == 0 else Color(1, 1, 0.9, 1)
+		var r0 := radius / 64.0 * (0.5 if pass_i == 0 else 0.25)
+		s.scale = Vector2.ONE * r0
+		s.visible = fx_on
+		fx_root.add_child(s)
+		var tw := s.create_tween()
+		tw.set_parallel(true)
+		tw.tween_property(s, "scale", Vector2.ONE * r0 * 3.2, dur).set_ease(Tween.EASE_OUT)
+		tw.tween_property(s, "modulate:a", 0.0, dur)
+		tw.chain().tween_callback(s.queue_free)
+
+
+func _process(dt: float) -> void:
+	_t += dt
+	# 井壁上自己发光的部分（矿脉、岩浆）缓慢地一明一暗
+	var pulse := _emis * (0.8 + 0.2 * sin(_t * 1.3) + 0.08 * sin(_t * 3.7))
+	emis.modulate = Color(pulse, pulse, pulse, 1.0)
+	# 震动：每帧随机偏一点，很快衰减
+	if _shake > 0.02:
+		position = _base + Vector2(randf_range(-1.0, 1.0), randf_range(-1.0, 1.0)) * _shake * scale.x
+		_shake = maxf(0.0, _shake - dt * (6.0 + _shake * 6.0))
+	elif position != _base:
+		position = _base
+		_shake = 0.0
+	# 黑灯：半秒左右暗下去、亮回来
+	if _dark != _dark_want:
+		_dark = move_toward(_dark, _dark_want, dt * 2.2)
+	if absf(_dark - _dark_done) > 0.02 or (_dark == _dark_want and _dark != _dark_done):
+		_apply_dark()
+	for n in lights_root.get_children():           # 画里的灯轻轻摇曳
+		var pl: PointLight2D = n.get_child(0)
+		pl.energy = float(pl.get_meta("e0")) * (1.0 + 0.06 * sin(_t * 6.1 + n.position.x) + 0.03 * sin(_t * 13.3)) * (1.0 - 0.85 * _dark)
+	for i in _extra.size():
+		var a := _t * (0.25 + 0.05 * i) + i * 1.7
+		_extra[i].position = Vector2(320.0 + cos(a) * (120.0 + 22.0 * (i % 5)), 215.0 + sin(a * 1.3) * 95.0)
+	if low_light.visible:
+		_update_low_light()
+
+
+# 画质和光影总开关。lit = 用真灯加法线贴图；低档不用真灯，改用一层整屏的"光斑"
+func apply(q: int, fx: bool) -> void:
+	quality = q
+	fx_on = fx
+	var lit := _lit()
+	var conf: Dictionary = TIERS[maxi(_tier, 0)]
+	ambient.visible = lit
+	low_light.visible = fx and q == Cfg.Q.LOW
+	for n in lights_root.get_children():
+		n.get_child(0).enabled = lit
+		for i in range(1, n.get_child_count()):
+			n.get_child(i).visible = fx
+	for n in _items.values():
+		n.set_look(fx, lit, _glow_for(n.kind), conf.rim.get(n.kind, Color(1, 1, 1, 0)))
+	for m in _miners.values():
+		m.hook.set_fx(fx, lit)
+		m.head.enabled = lit
+	bg.material.set_shader_parameter("top_mul", 0.95 if fx else 1.0)       # 关掉光影时底图恢复原样
+	if not fx:
+		bg.material.set_shader_parameter("deep_mul", 1.0)
+		bg.material.set_shader_parameter("saturation", 1.0)
+	else:
+		bg.material.set_shader_parameter("deep_mul", conf.deep)
+		bg.material.set_shader_parameter("saturation", 1.12)
+	emis.visible = fx
+	embers.visible = fx and _tier == 3
+	dust.visible = fx and q != Cfg.Q.LOW
+	for l in _extra:
+		l.enabled = lit
+
+
+# 压力测试：把同屏真灯的总数加到 n 盏（多出来的在井里转圈）
+func set_light_count(n: int) -> void:
+	while light_count() < n:
+		var l := PointLight2D.new()
+		l.texture = LIGHT_TEX
+		l.texture_scale = 0.7
+		l.height = 12.0
+		l.energy = 0.3
+		l.color = Color.from_hsv(fmod(0.08 + 0.13 * _extra.size(), 1.0), 0.55, 1.0)
+		l.enabled = _lit()
+		add_child(l)
+		_extra.append(l)
+	_fix_lights(self)
+
+
+func light_count() -> int:
+	var gems := 0
+	for n in _items.values():
+		if n.light.visible:
+			gems += 1
+	return lights_root.get_child_count() + _miners.size() * 2 + gems + _extra.size()
+
+
+# 灯光高度要跟着放大倍数走，不然放大后光会显得更"贴地"
+func set_scale_k(kk: float) -> void:
+	_k = kk
+	_fix_lights(self)
+
+
+func _fix_lights(root: Node) -> void:
+	var list: Array = root.find_children("*", "PointLight2D", true, false)
+	if root is PointLight2D:
+		list.append(root)
+	for n in list:
+		if not n.has_meta("h0"):
+			n.set_meta("h0", n.height)
+		n.height = float(n.get_meta("h0")) * _k
+
+
+func _update_low_light() -> void:
+	var ls := PackedVector4Array()
+	var cs := PackedVector3Array()
+	for n in lights_root.get_children():
+		var pl: PointLight2D = n.get_child(0)
+		ls.append(Vector4(n.position.x, n.position.y, 128.0 * pl.texture_scale, pl.energy))
+		cs.append(Vector3(pl.color.r, pl.color.g, pl.color.b))
+	for m in _miners.values():
+		if ls.size() >= 12:
+			break
+		var cp: Vector2 = m.hook.position + m.hook.claw.position
+		ls.append(Vector4(cp.x, cp.y + 6.0, 110.0, 0.8))
+		cs.append(Vector3(1.0, 0.88, 0.66))
+	var cnt := ls.size()
+	ls.resize(12)
+	cs.resize(12)
+	var mat: ShaderMaterial = low_light.material
+	mat.set_shader_parameter("count", cnt)
+	mat.set_shader_parameter("lights", ls)
+	mat.set_shader_parameter("colors", cs)
+	mat.set_shader_parameter("ambient", Vector3(ambient.color.r, ambient.color.g, ambient.color.b))
