@@ -243,7 +243,7 @@ test('道具·冰冻：所有对手冻 3 秒，冻住时不能放钩、钩子不
   run(room, 0.2); fire(room, p2); assert.equal(p2.st, EXT, '3 秒后解冻');
 });
 
-test('道具·沙漏：只有合作能用，本关 +8 秒；各玩法只能用自己的道具', () => {
+test('道具·沙漏：合作使用后本关 +8 秒，同屏对战不能用', () => {
   const co = playing('co', 1); co.ps[0].tools.h = 1; co.ps[0].tools.s = 1; co.ps[0].tools.f = 1;
   const tl = co.room.tl; useTool(co.room, co.ps[0], 'h');
   assert.equal(co.room.tl, tl + 8); assert.equal(co.ps[0].tools.h, 0);

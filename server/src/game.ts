@@ -13,7 +13,7 @@ export function newRoom(code: string, rnd: () => number = Math.random): Room {
   return {
     code, mode: 'vs', rounds: 3, host: null, conns: new Set(), players: [], nextPid: 1, nextItem: 1,
     ph: 'lobby', round: 0, tl: 0, now: 0, fields: [], ev: [], money: 0, earned: 0, target: 0,
-    res: null, final: false, dirty: true, acc: 0, emptyAt: 0, shopId: 0, list: {}, floor: {}, sale: '', rnd,
+    res: null, final: false, paused: false, dirty: true, acc: 0, emptyAt: 0, shopId: 0, list: {}, floor: {}, sale: '', rnd,
     event: null, keyBy: 0, evHist: [], forceEvents: null, startedAt: 0, logged: false,
   };
 }
@@ -37,6 +37,7 @@ export function newPlayer(room: Room, conn: Conn | null, name: string, bot = fal
 /* ───────── 对局流程 ───────── */
 export function startGame(room: Room, nowMs: number = Date.now()): void {
   room.round = 0; room.money = 0; room.final = false;
+  room.paused = false; room.res = null; room.ev = [];
   room.evHist = []; room.startedAt = nowMs; room.logged = false;
   for (const p of room.players) {
     p.money = 0; p.total = 0; p.buff = {}; p.next = {}; p.out = false; p.passed = 0;
@@ -57,12 +58,12 @@ export function nextRound(room: Room): void {
   room.players.forEach((p, i) => {
     p.f = room.fields[race ? i : 0]; p.x = race ? W / 2 : Math.round(W * (i + 1) / (n + 1));
     p.earned = 0; p.buff = p.next; p.next = {}; p.strongR = false; p.ready = false;
-    p.phase = race ? 0.6 : i * 1.3 + room.rnd();             // 分屏大家起摆角度也一样
+    p.phase = race || room.mode === 'solo' ? 0.6 : i * 1.3 + room.rnd();             // 分屏大家起摆角度也一样
     p.ang = AMP * Math.sin(p.phase); p.len = MINL; p.st = SW; p.item = 0; p.frozen = 0;
     p.botCd = 0.4 + room.rnd();
     p.combo = 0; p.rocksGot = 0; p.hold = 0; p.ghostAt = FUN.race.ghostFirst; p.ghostN = 0;
   });
-  room.target = race ? goalOf(room.round, 1) : room.mode === 'co' ? goalOf(room.round, n) : 0;
+  room.target = room.mode === 'vs' ? 0 : goalOf(room.round, room.mode === 'co' ? n : 1);
   room.ph = 'count'; room.tl = COUNT_T; room.dirty = true;
 }
 // 每种东西出几个：基础数量随深度涨，再按所在的层加料
@@ -86,6 +87,7 @@ export function genItems(room: Room, n: number): Item[] {
   if (coopOn(room)) {                                        // 合作（两人以上）：每关有一块一个人拉不动的巨型金块、一把钥匙和一个宝箱；大金块少一块
     cnt.gx = Math.max(cnt.gx, FUN.coop.giant); cnt.gl = Math.max(0, cnt.gl - FUN.coop.lessBigGold); cnt.chest = 1; cnt.key = 1;
   }
+  if (room.mode === 'solo') cnt.gx = 0;
   const items: Item[] = [];
   for (const k of ['gx', 'chest', 'gl', 'rl', 'gm', 'fos', 'bag', 'tnt', 'gs', 'rs', 'gem', 'rub', 'bug', 'key']) {   // 先放大的
     const t = TI[k], T = TYPES[t], ymin = YMIN[k] || 265;
@@ -112,7 +114,7 @@ export function endRound(room: Room): void {
   let co: { target: number; have: number; pass: boolean } | null = null;
   if (mode === 'co') { const pass = room.money >= room.target; co = { target: room.target, have: room.money, pass }; room.final = !pass; }
   else if (mode === 'vs') room.final = room.round >= room.rounds;
-  else {                                                     // 分屏：没赚够目标的淘汰，剩一个人（单人则是自己失败）就结束
+  else {                                                     // 分屏或单人闯关：看手里的钱是否达到目标
     for (const p of room.players) {
       if (p.out) continue;
       if (p.money >= room.target) p.passed = room.round; else { p.out = true; failedNow.add(p); }
@@ -138,6 +140,7 @@ export function syncPhase(p: Player): void {                 // 让摆动相位�
   p.phase = Math.cos(p.phase) >= 0 ? s : Math.PI - s;
 }
 export function fire(room: Room, p: Player, a?: unknown): void {
+  if (room.paused) return;
   if (room.ph === 'play' && p.out) { ghostThrow(room, p); return; }      // 分屏里淘汰的人：放钩键变成往别人井里丢石头
   if (room.ph !== 'play' || p.out || p.st !== SW || p.frozen > room.now) return;
   // 客户端画面比服务端慢几十毫秒，以玩家按下时看到的角度为准（差太多就不认）
@@ -200,7 +203,7 @@ export function collect(room: Room, p: Player, it: Item): void {
   p.st = SW; p.len = MINL; p.item = 0; p.botCd = 0.7 + room.rnd() * 1.1;
 }
 export function useTool(room: Room, p: Player, k: string): void {
-  if (room.ph !== 'play' || p.frozen > room.now || !(p.tools[k] > 0)) return;
+  if (room.paused || room.ph !== 'play' || p.frozen > room.now || !(p.tools[k] > 0)) return;
   if (!TOOL_ORDER[room.mode].includes(k)) return;
   if (k === 'd') {                                           // 炸药：炸掉正在拉的东西，马上收钩
     if (p.st !== HAUL) return;
@@ -333,9 +336,17 @@ export function sim(room: Room, dt: number): void {
   }
   for (const p of room.players) { if (p.bot) botThink(room, p, dt); stepPlayer(room, p, dt); }
 }
+// 只允许暂停单人闯关的下井倒计时和挖矿阶段。网页切后台和断线可以重复要求暂停。
+export function setSoloPaused(room: Room, paused: boolean): boolean {
+  if (room.mode !== 'solo' || (room.ph !== 'count' && room.ph !== 'play') || room.paused === paused) return false;
+  room.paused = paused;
+  return true;
+}
+
 // 房间往前走一小步（服务端每 33 毫秒调一次）
 export function tickRoom(room: Room, dt: number): void {
   room.acc++;
+  if (room.paused) return;
   if (room.ph === 'count') {
     room.tl -= dt;
     for (const p of room.players) { p.phase += SWING * dt; p.ang = AMP * Math.sin(p.phase); }
@@ -380,6 +391,7 @@ export function snapshot(room: Room): Record<string, any> {
   // F：每口井里的东西。同屏玩法只有一口，分屏每人一口
   if (live) o.F = room.fields.map(f => f.items.map(it => [it.id, it.t, Math.round(it.x * 10) / 10, Math.round(it.y * 10) / 10, it.by]));
   if (room.mode !== 'vs') o.tg = room.target;
+  if (room.mode === 'solo') o.paused = room.paused;
   if (co) { o.te = room.money; o.ky = room.keyBy; }
   if (live && room.event) {                                  // 这一关的事件：[哪个, 0 还没来 / 1 正在发生 / 2 过去了, 还有几秒]
     const e = room.event;
@@ -387,7 +399,7 @@ export function snapshot(room: Room): Record<string, any> {
   }
   if (room.ph === 'shop') {
     o.pr = room.list; o.sale = room.sale;
-    if (room.mode !== 'vs') o.ng = goalOf(room.round + 1, room.mode === 'race' ? 1 : room.players.length);
+    if (room.mode !== 'vs') o.ng = goalOf(room.round + 1, room.mode === 'co' ? room.players.length : 1);
   }
   if (room.ph === 'rend' || room.ph === 'over') o.res = room.res;
   return o;

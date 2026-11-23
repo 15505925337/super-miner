@@ -27,6 +27,9 @@ var emo_seen := 0                # 一共看到几次喊话（联调脚本用）
 var ev_seen := {}                # 每种事件各收到几次（联调脚本用它确认"丢石头""拉不动"这些真的发生过）
 var _pred := {}                  # 玩家 id → {t, ang}：本机刚按了放钩，服务端还没回话，先在本地把钩子画出去
 var hitstop_until := 0.0         # 顿帧：在这个时刻（毫秒）之前画面停住不动
+var _tab_hidden := false
+var _visibility_callback: JavaScriptObject
+var _solo_best := {"round": 0, "total": 0}
 var _tick_s := -1                # 最后几秒的滴答声响到第几秒了
 
 const EMOTE_KEYS := [KEY_Z, KEY_X, KEY_C, KEY_V, KEY_B, KEY_N]
@@ -49,15 +52,86 @@ func _ready() -> void:
 	Net.got_err.connect(_on_err)
 	Net.got_left.connect(_on_left)
 	Net.link_changed.connect(func(_up): changed.emit())
+	if OS.has_feature("web"):
+		var document := JavaScriptBridge.get_interface("document")
+		_visibility_callback = JavaScriptBridge.create_callback(_on_visibility_changed)
+		document.addEventListener("visibilitychange", _visibility_callback)
+		_on_visibility_changed([])
+
+
+func _exit_tree() -> void:
+	if _visibility_callback != null:
+		JavaScriptBridge.get_interface("document").removeEventListener("visibilitychange", _visibility_callback)
+
+
+func _on_visibility_changed(_args: Array) -> void:
+	_tab_hidden = bool(JavaScriptBridge.get_interface("document").hidden)
+	if _tab_hidden:
+		request_solo_pause(true)
 
 
 # ───── 小工具 ─────
 func ph() -> String:
-	return String(cur.get("ph", "lobby")) if not meta.is_empty() and not cur.is_empty() else ("lobby" if not meta.is_empty() else "")
+	if meta.is_empty():
+		return ""
+	if cur.is_empty():
+		return "" if mode() == "solo" else "lobby"
+	return String(cur.ph)
 
 
 func mode() -> String:
 	return String(meta.get("mode", "vs"))
+
+
+func solo_can_pause() -> bool:
+	return mode() == "solo" and ph() in ["count", "play"]
+
+
+func solo_paused() -> bool:
+	return solo_can_pause() and (bool(cur.get("paused", false)) or not Net.up)
+
+
+func request_solo_pause(paused: bool) -> void:
+	if solo_can_pause():
+		Net.send({"t": "pause", "paused": paused})
+
+
+func leave_solo() -> void:
+	if Net.up:
+		Net.send({"t": "leave"})
+	else:
+		_reset()
+
+
+func again_solo() -> void:
+	if mode() == "solo" and ph() == "over":
+		Net.send({"t": "again"})
+
+
+func update_solo_record(round_no: int, total: int) -> Dictionary:
+	var web := OS.has_feature("web")
+	if web:
+		var saved = JavaScriptBridge.eval("""(function(){
+			try {
+				var r = JSON.parse(localStorage.getItem('dj_solo_best'));
+				if (r && Number.isSafeInteger(r.round) && r.round > 0 &&
+				    Number.isSafeInteger(r.total) && r.total >= 0) return JSON.stringify(r);
+			} catch (e) {}
+			return '{}';
+		})()""", true)
+		var record: Dictionary = JSON.parse_string(String(saved))
+		if _beats_solo_record(int(record.get("round", 0)), int(record.get("total", 0))):
+			_solo_best = record
+	var is_new := _beats_solo_record(round_no, total)
+	if is_new:
+		_solo_best = {"round": round_no, "total": total}
+		if web:
+			JavaScriptBridge.eval("try{localStorage.setItem('dj_solo_best',%s)}catch(e){}" % JSON.stringify(JSON.stringify(_solo_best)), true)
+	return {"round": int(_solo_best.round), "total": int(_solo_best.total), "is_new": is_new}
+
+
+func _beats_solo_record(round_no: int, total: int) -> bool:
+	return round_no > int(_solo_best.round) or (round_no == int(_solo_best.round) and total > int(_solo_best.total))
 
 
 func my_ids() -> Array:
@@ -130,6 +204,10 @@ func _on_state(m: Dictionary) -> void:
 		m["fm"] = fm
 	prev = cur
 	cur = m
+	if solo_paused():
+		_pred.clear()
+	if _tab_hidden and not solo_paused() and String(prev.get("ph", "")) != ph():
+		request_solo_pause(true)
 	if not String(m.ph) in ["count", "play"]:
 		_miner_reactions.clear()
 		_miner_motion.clear()
@@ -156,6 +234,7 @@ func _reset() -> void:
 	cur = {}
 	_miner_reactions.clear()
 	_miner_motion.clear()
+	_pred.clear()
 	Net.set_url_room("")
 	changed.emit()
 
@@ -309,11 +388,11 @@ func _haul_speed(c: Dictionary, p: Dictionary, weight: float) -> float:
 	return float(b.HAUL_V) / weight * (float(b.STRONG) if int(c.sg) == 1 else 1.0)
 
 
-func _miner_frame(o: Dictionary, c: Dictionary, p: Dictionary, now: float) -> String:
+func _miner_frame(o: Dictionary, c: Dictionary, p: Dictionary, now: float, paused: bool) -> String:
 	var anim: Dictionary = _miner_motion.get_or_add(int(o.id), {"frame": "idle", "cycle": 0.0, "motion": "", "at": now})
 	var dt := (now - float(anim.at)) / 1000.0
 	anim.at = now
-	if int(o.fz) == 1:
+	if paused or int(o.fz) == 1:
 		return String(anim.frame)
 	var st := int(o.st)
 	var frame := "idle"
@@ -357,7 +436,8 @@ func _miner_frame(o: Dictionary, c: Dictionary, p: Dictionary, now: float) -> St
 
 # ───── 发给服务端的操作 ─────
 func create(mode_key: String, player_name: String) -> void:
-	Net.save_name(player_name)
+	if mode_key != "solo" or not player_name.strip_edges().is_empty():
+		Net.save_name(player_name)
 	Net.send({"t": "create", "name": player_name, "mode": mode_key})
 
 
@@ -369,7 +449,7 @@ func join(code: String, player_name: String) -> void:
 func fire_seat(seat: int) -> void:
 	var ids := my_ids()
 	keys_seen += 1
-	if ph() == "play" and seat < ids.size():
+	if ph() == "play" and not solo_paused() and seat < ids.size():
 		fires_sent += 1
 		var ang := snappedf(float(view_ang.get(ids[seat], 0.0)), 0.001)
 		Net.send({"t": "fire", "i": ids[seat], "a": ang})
@@ -384,18 +464,20 @@ func fire_seat(seat: int) -> void:
 # 快捷喊话：只发编号。服务端限了频率（2 秒一次）
 func emote(k: int) -> void:
 	var ids := my_ids()
-	if ids.size() > 0 and ph() != "" and ph() != "lobby":
+	if ids.size() > 0 and ph() != "" and ph() != "lobby" and not solo_paused():
 		Net.send({"t": "emote", "i": ids[0], "k": k})
 
 
 func tool_seat(seat: int, index: int) -> void:
 	var ids := my_ids()
 	var order: Array = Cfg.b().TOOL_ORDER[mode()]
-	if ph() == "play" and seat < ids.size() and index < order.size():
+	if ph() == "play" and not solo_paused() and seat < ids.size() and index < order.size():
 		Net.send({"t": "tool", "i": ids[seat], "k": order[index]})
 
 
 func _unhandled_input(e: InputEvent) -> void:
+	if solo_paused():
+		return
 	if e is InputEventKey and e.pressed and not e.echo:      # 喊话和静音在哪个阶段都能按（输入框里打字时按键到不了这里）
 		var code0: int = e.physical_keycode if e.physical_keycode != 0 else e.keycode
 		var ei: int = EMOTE_KEYS.find(code0)
@@ -431,6 +513,9 @@ func _unhandled_input(e: InputEvent) -> void:
 
 func _process(dt: float) -> void:
 	_t += dt
+	if solo_paused():
+		_pred.clear()
+		return
 	if auto and ph() == "play":
 		_auto_step()
 	if ph() == "play":                                   # 最后 5 秒，每秒滴答一声
@@ -499,7 +584,8 @@ func _auto_step() -> void:
 func time_left() -> float:
 	if cur.is_empty():
 		return 0.0
-	return maxf(0.0, float(cur.tl) - (Time.get_ticks_msec() - float(cur._t)) / 1000.0)
+	var elapsed := 0.0 if solo_paused() else (Time.get_ticks_msec() - float(cur._t)) / 1000.0
+	return maxf(0.0, float(cur.tl) - elapsed)
 
 
 # ───── 每一帧：算出每口井该画什么 ─────
@@ -508,9 +594,10 @@ func build_view() -> Dictionary:
 	var now := float(Time.get_ticks_msec())
 	var phase := ph()
 	var live := phase == "play" or phase == "count"
+	var paused := solo_paused()
 	# 服务端每秒 30 帧，这里在最近两帧之间插值，画面才顺（故意比最新一帧慢 45 毫秒）
 	var a := 1.0
-	if live and prev.has("F") and float(cur._t) > float(prev._t):
+	if live and not paused and prev.has("F") and not bool(prev.get("paused", false)) and float(cur._t) > float(prev._t):
 		a = clampf((now - 45.0 - float(prev._t)) / (float(cur._t) - float(prev._t)), 0.0, 1.4)
 	var fields := []
 	if live and cur.has("F"):
@@ -576,7 +663,7 @@ func build_view() -> Dictionary:
 						_pred.erase(id)
 				o.fz = int(c.fz)
 				o.sg = int(c.sg)
-				o.frame = _miner_frame(o, c, p, now)
+				o.frame = _miner_frame(o, c, p, now, paused)
 				# 矿工头上那行字：对战和分屏显示各自的钱；本机多人时再带上各自的道具和按键
 				var tag := Cfg.money(o.m) if mode() != "co" else ""
 				if int(c.sg) == 1:
@@ -615,11 +702,14 @@ func build_view() -> Dictionary:
 	var clock := ""
 	if live:
 		plate = "%s · 地下 %d 米" % [b.LAYERS[tier], depth * 30]
-		clock = "%d 秒" % ceili(time_left()) if phase == "play" else ""
+		clock = "%d 秒" % ceili(time_left()) if phase == "play" or mode() == "solo" else ""
 		if mode() == "vs":
 			plank = "第 %d / %d 局" % [int(cur.rd), int(meta.rounds)]
 		elif mode() == "co":
 			plank = "第 %d 关　%s / %s" % [int(cur.rd), Cfg.money(cur.get("te", 0)), Cfg.money(cur.get("tg", 0))]
+		elif mode() == "solo":
+			var me: Dictionary = pstate(my_ids()[0]) if not my_ids().is_empty() else {}
+			plank = "第 %d 关　%s / %s" % [int(cur.rd), Cfg.money(me.get("m", 0)), Cfg.money(cur.get("tg", 0))]
 		else:
 			plank = "第 %d 关　目标 %s" % [int(cur.rd), Cfg.money(cur.get("tg", 0))]
 	# 这一关的随机事件：倒计时的时候大字预告，开挖后在顶上写还有几秒
@@ -630,7 +720,7 @@ func build_view() -> Dictionary:
 	if live and cur.has("ev"):
 		var ev: Array = cur.ev
 		var conf: Dictionary = b.FUN.events.get(String(ev[0]), {})
-		var secs: float = maxf(0.0, float(ev[2]) - (now - float(cur._t)) / 1000.0) if phase == "play" else float(ev[2])
+		var secs: float = maxf(0.0, float(ev[2]) - (now - float(cur._t)) / 1000.0) if phase == "play" and not paused else float(ev[2])
 		if phase == "count":
 			event_big = "本关事件：%s" % String(conf.get("n", ""))
 			event_sub = String(conf.get("d", ""))
@@ -653,6 +743,6 @@ func build_view() -> Dictionary:
 				note = "你淘汰了。按放钩键，往钱最多的人井里丢石头（本关还剩 %d 块）" % int(me.gn)
 	return {
 		"live": live, "split": live and mode() == "race" and n > 1, "fields": fields, "players": players,
-		"info": {"live": live, "tier": tier, "dark": dark},
+		"info": {"live": live, "tier": tier, "dark": dark, "paused": paused},
 		"hud": {"plate": plate + ("　" + event if event != "" else ""), "plank": plank, "clock": clock, "event": event, "event_big": event_big, "event_sub": event_sub, "note": note},
 	}

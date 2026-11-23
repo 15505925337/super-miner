@@ -137,7 +137,7 @@ test('合作：第二个人钩上去合拉，巨型金块才拉得上来，钱�
   assert.equal(room.money, Math.round(TYPES[TI.gx].v * 1.1)); assert.equal(b.stats.assists, 1); assert.equal(a.hold, 0);
 });
 
-test('合作：只有一个人时（单人闯关），巨型金块自己拉得动，也不出钥匙和宝箱', () => {
+test('合作：只有一个人时，巨型金块自己拉得动，也不出钥匙和宝箱', () => {
   const { room, ps: [a] } = playing('co', 1);
   const gx = put(room, 0, 'gx', a.x, 500);
   a.ang = 0; fire(room, a);

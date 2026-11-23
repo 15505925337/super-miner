@@ -372,6 +372,7 @@ func _process(dt: float) -> void:
 			h.players = [pl]
 			huds.append(h)
 	else:
+		well.process_mode = Node.PROCESS_MODE_DISABLED if view.info.paused else Node.PROCESS_MODE_INHERIT
 		well.set_view(view.fields[0], players, view.info)
 		var h: Dictionary = view.hud.duplicate()
 		h.origin = Vector2.ZERO
@@ -442,7 +443,7 @@ func _test_hooks() -> void:
 	var o := {
 		"up": Net.up, "ph": client.ph(), "code": client.meta.get("code", ""), "mode": client.meta.get("mode", ""), "host": client.is_host(), "you": client.my_ids(),
 		"rd": int(c.get("rd", 0)), "dp": int(c.get("dp", 0)), "tl": float(c.get("tl", 0)), "tg": c.get("tg", 0), "te": c.get("te", 0), "players": ps, "toast": client.last_toast,
-		"res": c.get("res", {}), "pr": c.get("pr", {}), "split": _split, "items": c.F[0].size() if c.has("F") else -1, "rects": ui.rects(), "k": snappedf(k, 0.001),
+		"paused": bool(c.get("paused", false)), "res": c.get("res", {}), "pr": c.get("pr", {}), "split": _split, "items": c.F[0].size() if c.has("F") else -1, "rects": ui.rects(), "k": snappedf(k, 0.001),
 		"keys": client.keys_seen, "fires": client.fires_sent, "focus": _focus_name(),
 		"ev": c.get("ev", []), "ky": int(c.get("ky", 0)), "emo": client.emo_seen, "evn": client.ev_seen, "sfx": Sfx.played, "muted": Sfx.muted, "fk": _field_kinds(c),
 	}

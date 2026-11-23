@@ -18,7 +18,7 @@ export const SW = 0, EXT = 1, HAUL = 2, RET = 3, AST = 4;
 
 export interface ItemType { k: string; n: string; r: number; v: number; w: number }
 export interface ShopDef { n: string; price: number; tool?: number; only?: string[]; d: string }
-export type Mode = 'co' | 'vs' | 'race';
+export type Mode = 'co' | 'vs' | 'race' | 'solo';
 export type Phase = 'lobby' | 'count' | 'play' | 'rend' | 'shop' | 'over';
 
 export const TYPES: ItemType[] = B.TYPES;
@@ -65,7 +65,7 @@ export interface Room {
   code: string; mode: Mode; rounds: number; host: string | null; conns: Set<Conn>; players: Player[];
   nextPid: number; nextItem: number; ph: Phase; round: number; tl: number; now: number;
   fields: Field[]; ev: Record<string, unknown>[]; money: number; earned: number; target: number;
-  res: unknown; final: boolean; dirty: boolean; acc: number; emptyAt: number;
+  res: unknown; final: boolean; paused: boolean; dirty: boolean; acc: number; emptyAt: number;
   shopId: number; list: Record<string, number>; floor: Record<string, number>; sale: string;
   rnd: () => number;                // 随机数来源，测试里换成固定的
   event: RoundEvent | null;         // 这一关的随机事件

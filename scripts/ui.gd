@@ -49,6 +49,13 @@ var hud_text: Control            # 井上的字都画在这里（在各个面板
 var rend: Control
 var shop: Control
 var over: Control
+var pause_btn: Button
+var pause_layer: Control
+var pause_shade: ColorRect
+var resume_btn: Button
+var pause_title: Label
+var pause_actions: VBoxContainer
+var leave_confirm: VBoxContainer
 var name_edit: LineEdit
 var code_edit: LineEdit
 var lobby_box: VBoxContainer
@@ -134,6 +141,7 @@ func _ready() -> void:
 	_build_rend()
 	_build_shop()
 	_build_over()
+	_build_pause()
 	_build_help()
 	# 提示条：一条两头淡出的暗带，字在中间
 	toast_band = TextureRect.new()
@@ -399,22 +407,24 @@ func _build_home() -> void:
 	home.add_child(_halo(Color(1.0, 0.74, 0.36, 0.5), Rect2(40, -34, 240, 150)))
 	var v := _vbox(home, 14)
 	v.add_child(_pic("res://art/logo.png", Vector2(0, 74)))
-	var sub := _l("一 到 四 人 联 机 钩 矿", 12, DIM)
+	v.add_theme_constant_override("separation", 2)
+	var solo := _b("单人闯关", func(): cl.create("solo", name_edit.text), "create_solo", "Primary")
+	solo.custom_minimum_size.y = 34
+	solo.add_theme_font_size_override("font_size", 18)
+	v.add_child(solo)
+	var sub := _l("一个人挖，每关达到目标就过关", 12, DIM)
 	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	v.add_child(sub)
 	v.add_child(Divider.new())
 	name_edit = _edit("起个名字（最多 10 个字）", 10, "name_edit")
 	name_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	v.add_child(_hbox([_l("名字", 12, GOLD), name_edit]))
-	v.add_child(_l("开一个新房间", 12, GOLD))
+	v.add_child(_l("和朋友一起玩", 12, GOLD))
+	var descriptions := {"co": "共用一口井，合力达到目标", "race": "各挖一口井，比谁闯得远", "vs": "同一口井抢矿，比谁钱多"}
 	for m in ["co", "race", "vs"]:
 		var b := _b(String(Cfg.b().MODE_NAMES[m]), func(): cl.create(m, name_edit.text), "create_" + m)
-		b.custom_minimum_size = Vector2(76, 30)
-		var d := _l(MODE_DESC[m], 12, DIM)
-		d.autowrap_mode = TextServer.AUTOWRAP_ARBITRARY
-		d.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		d.custom_minimum_size = Vector2(0, 30)
-		v.add_child(_hbox([b, d]))
+		b.custom_minimum_size = Vector2(76, 24)
+		v.add_child(_hbox([b, _l(descriptions[m], 12, DIM)]))
 	v.add_child(Divider.new())
 	code_edit = _edit("4 位房间号", 4, "code_edit")
 	code_edit.custom_minimum_size = Vector2(90, 0)
@@ -436,6 +446,8 @@ func _screen_bg(texture: Texture2D) -> Sprite2D:
 
 func set_draw_area(area: Rect2) -> void:
 	_draw_area = area
+	pause_shade.position = area.position
+	pause_shade.size = area.size
 	for bg in [home_bg, shop_bg]:
 		bg.position = area.position
 		bg.region_rect = Rect2(area.position * 3.0, area.size * 3.0)
@@ -544,6 +556,11 @@ func _build_hud() -> void:
 	count_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	count_l.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	hud.add_child(count_l)
+	pause_btn = _b("暂停", func(): cl.request_solo_pause(true), "solo_pause", "Small")
+	pause_btn.position = Vector2(588, 2)
+	pause_btn.custom_minimum_size = Vector2(44, 20)
+	pause_btn.tooltip_text = "Esc 暂停"
+	hud.add_child(pause_btn)
 	# 喊话：左下角一个小按钮，点开是六句固定的话（也可以直接按 Z X C V B N）
 	var list: Array = Cfg.b().FUN.emotes
 	emo_box = VBoxContainer.new()
@@ -622,7 +639,8 @@ func draw_hud(huds: Array, split: bool) -> void:
 				_band(band.position, band.size)
 			_hud_text(o + Vector2(8, 3) * sc, Vector2(220, 16) * sc, String(h.plate), fs, CREAM, HORIZONTAL_ALIGNMENT_LEFT)
 			_hud_text(o + Vector2(170, 3) * sc, Vector2(300, 16) * sc, String(h.plank), fs, GOLD, HORIZONTAL_ALIGNMENT_CENTER)
-			_hud_text(o + Vector2(540, 3) * sc, Vector2(92, 16) * sc, String(h.clock), fs, CREAM, HORIZONTAL_ALIGNMENT_RIGHT)
+			var clock_x := 483 if cl.mode() == "solo" else 540
+			_hud_text(o + Vector2(clock_x, 3) * sc, Vector2(92, 16) * sc, String(h.clock), fs, CREAM, HORIZONTAL_ALIGNMENT_RIGHT)
 			for p in h.players:
 				var x: float = float(p.x) * Cfg.S
 				_hud_text(o + Vector2(x - 75, 31) * sc, Vector2(150, 14) * sc, String(p.name) + "  " + String(p.tag), fs, cl.pcolor(int(p.id)), HORIZONTAL_ALIGNMENT_CENTER)
@@ -747,6 +765,13 @@ func _fill_rend() -> void:
 		rows.sort_custom(func(x, y): return int(x.e) > int(y.e))
 		for i in rows.size():
 			rend_box.add_child(_rank_row(i + 1, int(rows[i].id), "这一关挖了", Cfg.money(rows[i].e)))
+	elif mode == "solo":
+		var row: Dictionary = rows[0]
+		var passed := not bool(r.final)
+		rend_box.add_child(_title("第 %d 关%s" % [int(r.round), "过关" if passed else "没过关"], 24, GOLD if passed else BAD))
+		rend_box.add_child(Divider.new())
+		rend_box.add_child(_l("手里的钱 %s / %s" % [Cfg.money(row.m), Cfg.money(r.target)], 12, DIM))
+		rend_box.add_child(_l("这一关挖了 %s" % Cfg.money(row.e), 12, GOLD))
 	elif mode == "race":
 		rend_box.add_child(_title("第 %d 关结束" % int(r.round), 24))
 		rend_box.add_child(Divider.new())
@@ -785,6 +810,9 @@ func _fill_over() -> void:
 	_clear(over_box)
 	var rows: Array = r.rows.duplicate()
 	var mode := String(r.mode)
+	if mode == "solo":
+		_fill_solo_over(int(r.round), int(rows[0].tt))
+		return
 	var head := ""
 	var note := ""
 	var lines := []
@@ -837,6 +865,83 @@ func _fill_over() -> void:
 	else:
 		btns.append(_l("等房主开下一场…", 12, DIM))
 	over_box.add_child(_hbox(btns))
+
+
+func _fill_solo_over(round_no: int, total: int) -> void:
+	var record: Dictionary = cl.update_solo_record(round_no, total)
+	var head := _title("闯到第 %d 关" % round_no, 28)
+	head.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	over_box.add_child(head)
+	over_box.add_child(Divider.new())
+	var earned := _l("本局一共挣了 %s" % Cfg.money(total), 16)
+	earned.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	over_box.add_child(earned)
+	var best := _l("最高纪录　 第 %d 关　%s" % [record.round, Cfg.money(record.total)], 14, DIM)
+	best.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	over_box.add_child(best)
+	if record.is_new:
+		var badge := _title("新纪录！", 18)
+		badge.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		over_box.add_child(badge)
+	over_box.add_child(_spacer_v())
+	var again := _b("再来一局", cl.again_solo, "again", "Primary")
+	again.custom_minimum_size.y = 40
+	again.add_theme_font_size_override("font_size", 18)
+	again.tooltip_text = "空格或回车"
+	over_box.add_child(again)
+	over_box.add_child(_b("回首页", cl.leave_solo, "over_leave"))
+
+
+func _build_pause() -> void:
+	pause_layer = Control.new()
+	pause_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(pause_layer)
+	pause_shade = ColorRect.new()
+	pause_shade.color = Color(0.04, 0.025, 0.03, 0.58)
+	pause_shade.mouse_filter = Control.MOUSE_FILTER_STOP
+	pause_layer.add_child(pause_shade)
+	var panel := _panel(Rect2(200, 112, 240, 136))
+	panel.reparent(pause_layer, false)
+	var v := _vbox(panel, 14)
+	pause_title = _title("已暂停")
+	pause_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	v.add_child(pause_title)
+	v.add_child(Divider.new())
+	pause_actions = VBoxContainer.new()
+	v.add_child(pause_actions)
+	resume_btn = _b("继续", func(): cl.request_solo_pause(false), "solo_resume", "Primary")
+	resume_btn.custom_minimum_size.y = 28
+	pause_actions.add_child(resume_btn)
+	pause_actions.add_child(_b("回首页", _confirm_solo_leave.bind(true), "solo_leave"))
+	leave_confirm = VBoxContainer.new()
+	v.add_child(leave_confirm)
+	var prompt := _l("当前闯关进度会结束", 12, DIM)
+	prompt.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	leave_confirm.add_child(prompt)
+	leave_confirm.add_child(_hbox([_spacer(), _b("取消", _confirm_solo_leave.bind(false), "solo_leave_cancel"),
+		_b("确认回首页", cl.leave_solo, "solo_leave_confirm"), _spacer()]))
+	_confirm_solo_leave(false)
+
+
+func _confirm_solo_leave(confirm: bool) -> void:
+	pause_title.text = "回首页？" if confirm else "已暂停"
+	pause_actions.visible = not confirm
+	leave_confirm.visible = confirm
+
+
+func _input(e: InputEvent) -> void:
+	if cl.mode() != "solo" or not (e is InputEventKey and e.pressed and not e.echo):
+		return
+	var key: int = e.physical_keycode if e.physical_keycode != 0 else e.keycode
+	if key == KEY_ESCAPE and cl.solo_can_pause():
+		if pause_layer.visible and leave_confirm.visible:
+			_confirm_solo_leave(false)
+		else:
+			cl.request_solo_pause(not cl.solo_paused())
+		get_viewport().set_input_as_handled()
+	elif cl.ph() == "over" and key in [KEY_SPACE, KEY_ENTER, KEY_KP_ENTER]:
+		cl.again_solo()
+		get_viewport().set_input_as_handled()
 
 
 # ───── 商店：整屏的场景，不是一块面板 ─────
@@ -1184,9 +1289,19 @@ func refresh() -> void:
 	home_bg.visible = home.visible
 	lobby.visible = ph == "lobby" and not help.visible
 	hud.visible = ph == "play" or ph == "count"
+	var paused: bool = cl.solo_paused()
+	pause_btn.visible = cl.solo_can_pause() and not paused
+	pause_layer.visible = paused
+	resume_btn.disabled = not Net.up
+	if paused:
+		emo_box.visible = false
+	else:
+		_confirm_solo_leave(false)
 	rend.visible = ph == "rend"
 	shop.visible = ph == "shop"
 	over.visible = ph == "over"
+	if not over.visible:
+		_sig.erase("over")
 	net_l.visible = not Net.up
 	if ph != "shop":
 		_shop_sel = ""

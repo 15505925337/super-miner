@@ -1,7 +1,7 @@
 // 房间管理和消息处理：开房、进房、掉线重连、房主操作、把玩家的按键转给规则。
 import { MAXP, MODES, BOT_NAMES, RULES, SHOP } from './core.ts';
 import type { Room, Player, Conn, Mode } from './core.ts';
-import { newRoom, newPlayer, layout, startGame, toLobby, fire, useTool, tickRoom, snapshot } from './game.ts';
+import { newRoom, newPlayer, layout, startGame, toLobby, fire, useTool, setSoloPaused, tickRoom, snapshot } from './game.ts';
 import { buyClick, keeperAct } from './shop.ts';
 import { emote, matchLog, EVENT_KEYS } from './fun.ts';
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -60,6 +60,7 @@ export class Hub {
     conn.room = null; room.conns.delete(conn);
     if (room.ph === 'lobby') { room.players = room.players.filter(p => p.conn !== conn); layout(room); }
     else for (const p of room.players) if (p.conn === conn) p.conn = null;   // 对局中只标记掉线，座位留着
+    setSoloPaused(room, true);
     if (!room.conns.size) { if (room.ph === 'lobby') this.rooms.delete(room.code); else room.emptyAt = nowMs; return; }
     if (room.host === conn.token) room.host = [...room.conns][0].token;
     this.sendMeta(room); room.dirty = true;
@@ -84,22 +85,35 @@ export class Hub {
       if (room) return;
       if (this.rooms.size >= RULES.maxRooms) { conn.send({ t: 'err', msg: '房间太多了，稍后再试' }); return; }
       const r = this.mkRoom(); r.host = conn.token; if (MODES.includes(m.mode)) r.mode = m.mode as Mode;
-      this.joinRoom(conn, r, m.name); return;
+      this.joinRoom(conn, r, m.name);
+      if (r.mode === 'solo') { startGame(r); this.broadcast(r); }
+      return;
     }
     if (m.t === 'join') {
       if (room) return;
       const r = this.rooms.get(String(m.code == null ? '' : m.code).trim());
       if (!r) { conn.send({ t: 'err', gone: 1, msg: '没有这个房间' }); return; }
-      this.joinRoom(conn, r, m.name); return;
+      if (r.mode === 'solo') {
+        if (!r.players.some(p => p.token === conn.token)) {
+          conn.send({ t: 'err', gone: 1, msg: '这是单人闯关房间，不能加入' }); return;
+        }
+        setSoloPaused(r, true);
+      }
+      this.joinRoom(conn, r, m.name);
+      if (r.mode === 'solo') this.broadcast(r);
+      return;
     }
     if (!room) return;
     const isHost = room.host === conn.token;
     const own = (id: unknown): Player | undefined => room.players.find(p => p.id === id && p.conn === conn);
     switch (m.t) {
-      case 'leave': this.leave(conn); conn.send({ t: 'left' }); break;
+      case 'leave':
+        this.leave(conn);
+        if (room.mode === 'solo') this.rooms.delete(room.code);
+        conn.send({ t: 'left' }); break;
       case 'cfg':
         if (!isHost || room.ph !== 'lobby') break;
-        if (MODES.includes(m.mode)) room.mode = m.mode as Mode;
+        if (m.mode !== 'solo' && MODES.includes(m.mode)) room.mode = m.mode as Mode;
         if (m.rounds === 3 || m.rounds === 5) room.rounds = m.rounds;
         this.sendMeta(room); break;
       case 'addBot': {
@@ -135,12 +149,19 @@ export class Hub {
         if (num && k) keeperAct(room, p, 'offer', k, Number(num[0]), text); else keeperAct(room, p, 'chat', k, null, text);
         break;
       }
-      case 'emote': { const p = own(m.i); if (p) emote(room, p, m.k); break; }     // 快捷喊话：只收编号，不收文字
+      case 'pause':
+        if (isHost && setSoloPaused(room, typeof m.paused === 'boolean' ? m.paused : !room.paused)) this.broadcast(room);
+        break;
+      case 'emote': { if (room.paused) break; const p = own(m.i); if (p) emote(room, p, m.k); break; }     // 快捷喊话：只收编号，不收文字
       case 'ready':
         if (room.ph !== 'shop') break;
         for (const p of room.players) if (p.conn === conn) p.ready = true;
         room.dirty = true; break;
-      case 'again': if (isHost && room.ph === 'over') { toLobby(room); this.sendMeta(room); } break;
+      case 'again':
+        if (!isHost || room.ph !== 'over') break;
+        if (room.mode === 'solo') { startGame(room); this.broadcast(room); }
+        else { toLobby(room); this.sendMeta(room); }
+        break;
     }
   }
 
@@ -151,7 +172,7 @@ export class Hub {
       try {
         tickRoom(room, dt);
         if (room.final && room.res && !room.logged) { room.logged = true; this.saveLog(room, nowMs); }   // 整场打完：存一份对局记录
-        const live = room.ph === 'count' || room.ph === 'play';
+        const live = !room.paused && (room.ph === 'count' || room.ph === 'play');
         if (live || room.dirty || room.acc % 6 === 0) { this.broadcast(room); room.dirty = false; }
       } catch (e) { console.error(e); }
     }
