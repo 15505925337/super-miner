@@ -131,6 +131,7 @@ func _ready() -> void:
 	_resolve_mat = _pass_material(resolve_vp, SH_RESOLVE)
 	_resolve_mat.set_shader_parameter("light_px", Vector2.ONE / Vector2(size))
 	_resolve_mat.set_shader_parameter("design_px", DESIGN_PX)
+	_resolve_mat.set_shader_parameter("wall_shadow_strength", _shadow / DEFAULT_SHADOW)
 	_resolve_mat.set_shader_parameter("light_tex", light_vp.get_texture())
 	_resolve_mat.set_shader_parameter("emission_tex", emission_vp.get_texture())
 	_resolve_mat.set_shader_parameter("shadow_tex", shadow_vp.get_texture())
@@ -316,24 +317,6 @@ func _sync_sprite(source: Sprite2D, pose: Transform2D, opacity: float, seen: Dic
 	mask.modulate.a = opacity
 
 
-func _sync_rope(source: Line2D, pose: Transform2D, seen: Dictionary) -> void:
-	var id := source.get_instance_id()
-	seen[id] = true
-	var mask: Line2D = _mask_nodes.get(id)
-	if mask == null:
-		mask = Line2D.new()
-		mask.default_color = Color.WHITE
-		mask.width = source.width
-		mask.joint_mode = source.joint_mode
-		mask.begin_cap_mode = source.begin_cap_mode
-		mask.end_cap_mode = source.end_cap_mode
-		mask.antialiased = source.antialiased
-		_mask_vp.add_child(mask)
-		_mask_nodes[id] = mask
-	mask.transform = pose
-	mask.points = source.points
-
-
 func _remove_old(nodes: Dictionary, seen: Dictionary) -> void:
 	for id in nodes.keys():
 		if not seen.has(id):
@@ -360,11 +343,8 @@ func _process(_dt: float) -> void:
 	for miner in _miners.values():
 		var sprite: Sprite2D = miner.sprite
 		var pose := to_design * sprite.global_transform
-		_sync_sprite(sprite, pose, miner.root.modulate.a, seen_masks)
-		var hook: Node2D = miner.hook
-		if hook.visible:
-			_sync_sprite(hook.claw_sprite, to_design * hook.claw_sprite.global_transform, 1.0, seen_masks)
-			_sync_rope(hook.rope_edge, to_design * hook.rope_edge.global_transform, seen_masks)
+		# 矿工、绞车和钩绳沿用原画与台沿接触影，留出瞄准路线。
+		if miner.hook.visible:
 			var source: Vector2 = HEAD_LAMPS[miner.c][miner.frame]
 			var head := pose * ((source / 512.0 - Vector2.ONE * 0.5) * sprite.texture.get_size())
 			_sync_light(sprite, head, HEAD_COLOR, Vector2(37.0, 116.0), false, seen_lights)

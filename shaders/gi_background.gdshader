@@ -12,15 +12,13 @@ uniform float ground_y = 0.0;
 
 const vec3 LUMA = vec3(0.299, 0.587, 0.114);
 
-vec3 daylight_color(vec3 base, vec4 lighting, vec3 emission) {
+vec3 daylight_color(vec3 base, vec4 lighting) {
 	float received = dot(lighting.rgb, LUMA);
-	float shade = lighting.a;
+	float original_luma = dot(base, LUMA);
 	// 底光随原画明度变化，暗纹压实，亮纹保留。软影同时减掉底光和受光增益。
-	float ambient = 0.92 - 0.40 * (1.0 - smoothstep(0.06, 0.30, dot(base, LUMA)));
-	// 阴影里仍能收到附近物件的彩光，主光的影子继续压暗原画。
-	float scattered = 0.40 * shade * pow(dot(emission, LUMA), 1.37);
-	float lift = 9.3 * daylight_strength * (pow(received, 1.37) * (1.0 - 0.80 * shade) + scattered);
-	float exposure = clamp(ambient + lift - 0.44 * shade, 0.48, 2.75);
+	float ambient = 0.92 - 0.40 * (1.0 - smoothstep(0.06, 0.30, original_luma));
+	float lift = 6.3 * daylight_strength * pow(received, 1.37);
+	float exposure = clamp(ambient + lift, 0.48, 2.75);
 	vec3 tinted = base * (1.0 + 0.20 * daylight_strength * (lighting.rgb - received));
 	float peak = max(tinted.r, max(tinted.g, tinted.b));
 	float room = max(0.001, 1.0 - peak);
@@ -29,7 +27,18 @@ vec3 daylight_color(vec3 base, vec4 lighting, vec3 emission) {
 	if (exposure > 1.0) {
 		gain = 1.0 + room * (1.0 - exp(-peak * (exposure - 1.0) / room)) / max(peak, 0.001);
 	}
-	return tinted * gain;
+	vec3 lit = clamp(tinted * gain, 0.0, 1.0);
+	float shadow_luma = max(original_luma * 0.65, original_luma - 32.0 / 255.0);
+	float distant_luma = max(shadow_luma, original_luma - 4.0 / 255.0);
+	float lit_luma = dot(lit, LUMA);
+	if (lit_luma < distant_luma) {
+		// 向原画回补底光，使淡出端不会接出一段暗柱。
+		lit = mix(lit, base, (distant_luma - lit_luma) / (original_luma - lit_luma));
+		lit_luma = distant_luma;
+	}
+	// 近影收向原画亮度的下限，出影时回到受光的井壁。
+	float shaded_luma = mix(lit_luma, shadow_luma, lighting.a);
+	return lit * (shaded_luma / max(lit_luma, 0.000001));
 }
 
 vec3 emission_color(vec3 color, vec3 emission) {
@@ -58,7 +67,7 @@ void fragment() {
 	vec3 color = base;
 	if (darkness < 1.0) {
 		vec3 emission = texture(emission_tex, UV).rgb;
-		color = emission_color(clamp(daylight_color(base, light, emission), 0.0, 1.0), emission);
+		color = emission_color(daylight_color(base, light), emission);
 	}
 	if (darkness > 0.0) {
 		// 完全黑灯时使用原先的彩光混合，避免暗处的底光再被压一遍。
