@@ -409,7 +409,7 @@ func _unhandled_key_input(e: InputEvent) -> void:
 
 func _process(dt: float) -> void:
 	if _dump_remaining > 0:
-		_update_frame_dump()
+		_update_frame_dump(dt)
 	var visual_dt := Cfg.visual_delta(dt)
 	_frames += 1
 	if _frames == 3 and is_web:
@@ -611,15 +611,17 @@ func _start_frame_dump(cmd: Dictionary) -> void:
 		return
 	if count < 1 or count > 9007199254740991 or count != floorf(count):
 		return
-	if _dump_remaining > 0 or bool(JavaScriptBridge.eval("!!(window.dmState.dump && !window.dmState.dump.done)", true)):
+	if _dump_remaining > 0 or JavaScriptBridge.eval("!!(window.dmState.dump && !window.dmState.dump.done)", true) == true:
 		return
 	_dump_name = dump_name
 	_dump_remaining = int(count)
 	_dump_index = 0
+	# 同批指令播出的特效留到首张截图再推进。
+	_set_dump_fx_speed(0.0)
 	JavaScriptBridge.eval("window.dmState.dump={name:%s,remaining:%d,pending:0,failed:0,done:false}" % [JSON.stringify(_dump_name), _dump_remaining], true)
 
 
-func _update_frame_dump() -> void:
+func _update_frame_dump(dt: float) -> void:
 	if not Cfg.dumping_frames:
 		# 在下一次 _process 开头切换，整帧用同一个步长。
 		_begin_dump_frames()
@@ -640,6 +642,15 @@ func _update_frame_dump() -> void:
 		Cfg.dump_delta = Cfg.DUMP_STEP
 		if client != null:
 			client.step_dump_view()
+	_set_dump_fx_speed(Cfg.dump_delta / dt if dt > 0.0 else 0.0)
+
+
+func _set_dump_fx_speed(speed: float) -> void:
+	if is_instance_valid(well):
+		well.set_fx_speed(speed)
+	for p in panes:
+		if is_instance_valid(p.well):
+			p.well.set_fx_speed(speed)
 
 
 func _begin_dump_frames() -> void:
@@ -696,12 +707,13 @@ func _end_dump_frames() -> void:
 	_dump_last_draw_at = 0
 	Cfg.dumping_frames = false
 	Cfg.dump_delta = 0.0
+	_set_dump_fx_speed(1.0)
 	if is_instance_valid(client):
 		client.end_dump_view()
 
 
 func _exit_tree() -> void:
-	if Cfg.dumping_frames:
+	if _dump_remaining > 0 or Cfg.dumping_frames:
 		_end_dump_frames()
 
 

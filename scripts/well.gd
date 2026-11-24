@@ -93,6 +93,9 @@ var _miners := {}                # 玩家 id → { root, sprite, shadow, hook, f
 var _gi: GI
 var _extra: Array[PointLight2D] = []
 var _chest_popups := {}          # 开箱玩家 id → 弹图节点。
+var _fx_speed := 1.0
+var _fx_sprites: Array[AnimatedSprite2D] = []
+var _fx_tweens: Dictionary[Node, Tween] = {}
 var _t := 0.0
 var _tier := -1
 var _base := Vector2.ZERO         # 这口井在画面上的位置（震动是在它上面加一点偏移）
@@ -217,7 +220,7 @@ func set_view(items: Array, players: Array, info: Dictionary) -> void:
 			_items[id] = n
 			if live and _live_t >= 0.0 and _t - _live_t > 0.6:     # 开挖以后才冒出来的（丢来的石头、金矿雨、塌方）：从小变大弹一下
 				n.scale = Vector2.ONE * 0.15
-				n.create_tween().tween_property(n, "scale", Vector2.ONE, 0.32).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+				_create_fx_tween(n).tween_property(n, "scale", Vector2.ONE, 0.32).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 				fx_flash(Vector2(it.x, it.y) * Cfg.S, 26.0, Color(0.8, 0.72, 0.6), 0.3)
 		n.position = Vector2(it.x, it.y) * Cfg.S
 		n.walk_dx = float(it.get("walk_dx", 0.0))
@@ -396,6 +399,27 @@ func set_gi(on: bool, divisor: int, bounce: float, shadow: float, keep_dark_glow
 	_gi.set_active(on)
 
 
+# 存图期间用倍率把引擎的本帧步长换算成存图步长，保留原有帧进度和缓动。
+func set_fx_speed(speed: float) -> void:
+	if speed == _fx_speed:
+		return
+	_fx_speed = speed
+	for sprite in _fx_sprites:
+		sprite.speed_scale = speed
+	for tween in _fx_tweens.values():
+		if tween.is_valid():
+			tween.set_speed_scale(speed)
+
+
+func _create_fx_tween(node: Node) -> Tween:
+	var tween := node.create_tween().set_speed_scale(_fx_speed)
+	_fx_tweens[node] = tween
+	var forget := func(): _fx_tweens.erase(node)
+	node.tree_exiting.connect(forget, CONNECT_ONE_SHOT)
+	tween.finished.connect(forget, CONNECT_ONE_SHOT)
+	return tween
+
+
 # 按画面上的物件边长，找可见范围最接近的一档。
 func _fx_size(span: float) -> String:
 	var closest := "s"
@@ -427,11 +451,14 @@ func _fx_sequence(kind: String, pos: Vector2, size: String = "", parent: Node2D 
 	s.scale = Vector2.ONE * PIXEL_SCALE
 	s.position = pos
 	s.modulate.a = float(conf.alpha)
+	s.speed_scale = _fx_speed
 	(parent if parent != null else fx_root).add_child(s)
+	_fx_sprites.append(s)
+	s.tree_exiting.connect(func(): _fx_sprites.erase(s), CONNECT_ONE_SHOT)
 	s.animation_finished.connect(s.queue_free)
 	s.play()
 	var duration := float(conf.duration)
-	s.create_tween().tween_property(s, "modulate:a", 0.0, duration * 0.5).set_delay(duration * 0.5)
+	_create_fx_tween(s).tween_property(s, "modulate:a", 0.0, duration * 0.5).set_delay(duration * 0.5)
 
 
 func fx_grab(pos: Vector2, kind: String) -> void:
@@ -458,7 +485,7 @@ func fx_chest(id: int) -> void:
 	sprite.scale = Vector2.ONE * PIXEL_SCALE
 	popup.add_child(sprite)
 	_fx_sequence("spark", Vector2(25, 22) * PIXEL_SCALE, _fx_size(16.0), popup)
-	var tw := popup.create_tween()
+	var tw := _create_fx_tween(popup)
 	tw.tween_property(popup, "modulate:a", 1.0, 0.16)
 	tw.tween_interval(1.0)
 	tw.tween_property(popup, "modulate:a", 0.0, 0.24)
@@ -567,7 +594,7 @@ func fx_text(pos: Vector2, text: String, color: Color = Color(1, 0.88, 0.29), si
 	l.text = text
 	l.z_index = 2
 	fx_root.add_child(l)
-	var tw := l.create_tween()
+	var tw := _create_fx_tween(l)
 	tw.set_parallel(true)
 	tw.tween_property(l, "position:y", l.position.y - 26.0, 1.2)
 	tw.tween_property(l, "modulate:a", 0.0, 1.2).set_ease(Tween.EASE_IN)
@@ -608,7 +635,7 @@ func fx_flash(pos: Vector2, radius: float, color: Color, dur: float = 0.4, alpha
 		var r0 := radius / 64.0 * (0.5 if pass_i == 0 else 0.25)
 		s.scale = Vector2.ONE * r0
 		fx_root.add_child(s)
-		var tw := s.create_tween()
+		var tw := _create_fx_tween(s)
 		tw.set_parallel(true)
 		tw.tween_property(s, "scale", Vector2.ONE * r0 * 3.2, dur).set_ease(Tween.EASE_OUT)
 		tw.tween_property(s, "modulate:a", 0.0, dur)
