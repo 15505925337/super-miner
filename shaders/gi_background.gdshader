@@ -4,6 +4,7 @@ render_mode unshaded, blend_disabled;
 
 uniform sampler2D backdrop_tex : hint_screen_texture, filter_nearest, repeat_disable;
 uniform sampler2D resolved_tex : filter_linear, repeat_disable;
+uniform sampler2D wall_shadow_tex : filter_linear, repeat_disable;
 uniform sampler2D emission_tex : filter_linear, repeat_disable;
 uniform float bounce_strength;
 uniform float daylight_strength;
@@ -66,6 +67,7 @@ void fragment() {
 	}
 	vec3 color = base;
 	if (darkness < 1.0) {
+		light.a = texture(wall_shadow_tex, UV).a;
 		vec3 emission = texture(emission_tex, UV).rgb;
 		color = emission_color(daylight_color(base, light), emission);
 	}

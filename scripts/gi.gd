@@ -7,6 +7,7 @@ const SH_JFA := preload("res://shaders/gi_jfa.gdshader")
 const SH_DISTANCE := preload("res://shaders/gi_distance.gdshader")
 const SH_LIGHT := preload("res://shaders/gi_light.gdshader")
 const SH_SHADOW := preload("res://shaders/gi_shadow.gdshader")
+const SH_SHADOW_RESOLVE := preload("res://shaders/gi_shadow_resolve.gdshader")
 const SH_RESOLVE := preload("res://shaders/gi_resolve.gdshader")
 const SH_BACKGROUND := preload("res://shaders/gi_background.gdshader")
 const DEFAULT_DIVISOR := 2
@@ -74,7 +75,7 @@ var _passes: Array[SubViewport] = []
 var _emitters := Node2D.new()
 var _mask_mat := ShaderMaterial.new()
 var _shadow_mat: ShaderMaterial
-var _resolve_mat: ShaderMaterial
+var _shadow_resolve_mat: ShaderMaterial
 var _resolved_tex: Texture2D
 var _mask_nodes := {}
 var _moving_lights := {}
@@ -112,8 +113,8 @@ func _ready() -> void:
 	distance_mat.set_shader_parameter("design_size", DESIGN_SIZE)
 	_distance_vp.add_child(nearest)
 
-	var size := DESIGN_SIZE / _divisor
-	var shadow_vp := _viewport(size)
+	# 主影和半影滤波都用设计分辨率，避免重新落到照明的低分辨率网格上。
+	var shadow_vp := _viewport(DESIGN_SIZE)
 	shadow_vp.name = "WallShadow"
 	_shadow_mat = _pass_material(shadow_vp, SH_SHADOW)
 	_shadow_mat.set_shader_parameter("distance_tex", _distance_vp.get_texture())
@@ -121,21 +122,29 @@ func _ready() -> void:
 	_shadow_mat.set_shader_parameter("wall_shadow_strength", _shadow / DEFAULT_SHADOW)
 	shadow_vp.add_child(_distance_vp)
 
+	var shadow_resolve_vp := _viewport(DESIGN_SIZE)
+	shadow_resolve_vp.name = "ShadowResolve"
+	# 透明视口配合无混合写入，以 A 通道和线性采样传递软影。
+	shadow_resolve_vp.transparent_bg = true
+	_shadow_resolve_mat = _pass_material(shadow_resolve_vp, SH_SHADOW_RESOLVE)
+	_shadow_resolve_mat.set_shader_parameter("shadow_tex", shadow_vp.get_texture())
+	_shadow_resolve_mat.set_shader_parameter("design_px", DESIGN_PX)
+	_shadow_resolve_mat.set_shader_parameter("wall_shadow_strength", _shadow / DEFAULT_SHADOW)
+	shadow_resolve_vp.add_child(shadow_vp)
+
+	var size := DESIGN_SIZE / _divisor
 	var light_vp := _light_buffer(size, "SceneLight", _tier_lights)
 	var emission_vp := _light_buffer(size, "Emission", _emitters)
 	var resolve_vp := _viewport(size)
 	resolve_vp.name = "Resolve"
-	# RGBA 中的 A 保存井壁遮挡。透明视口配合无混合写入保留四个通道。
+	# 照明沿用原合成视口的配置。
 	resolve_vp.transparent_bg = true
-	_resolve_mat = _pass_material(resolve_vp, SH_RESOLVE)
-	_resolve_mat.set_shader_parameter("light_px", Vector2.ONE / Vector2(size))
-	_resolve_mat.set_shader_parameter("design_px", DESIGN_PX)
-	_resolve_mat.set_shader_parameter("wall_shadow_strength", _shadow / DEFAULT_SHADOW)
-	_resolve_mat.set_shader_parameter("light_tex", light_vp.get_texture())
-	_resolve_mat.set_shader_parameter("emission_tex", emission_vp.get_texture())
-	_resolve_mat.set_shader_parameter("shadow_tex", shadow_vp.get_texture())
-	# 先画三个输入视口，再合成与滤波，主井最后读取。
-	resolve_vp.add_child(shadow_vp)
+	var resolve_mat := _pass_material(resolve_vp, SH_RESOLVE)
+	resolve_mat.set_shader_parameter("light_px", Vector2.ONE / Vector2(size))
+	resolve_mat.set_shader_parameter("light_tex", light_vp.get_texture())
+	resolve_mat.set_shader_parameter("emission_tex", emission_vp.get_texture())
+	# 子视口先完成采样和滤波，主井最后读取照明与软影。
+	resolve_vp.add_child(shadow_resolve_vp)
 	resolve_vp.add_child(light_vp)
 	resolve_vp.add_child(emission_vp)
 	add_child(resolve_vp)
@@ -144,6 +153,7 @@ func _ready() -> void:
 	var overlay_mat := ShaderMaterial.new()
 	overlay_mat.shader = SH_BACKGROUND
 	overlay_mat.set_shader_parameter("resolved_tex", _resolved_tex)
+	overlay_mat.set_shader_parameter("wall_shadow_tex", shadow_resolve_vp.get_texture())
 	overlay_mat.set_shader_parameter("emission_tex", emission_vp.get_texture())
 	overlay_mat.set_shader_parameter("bounce_strength", _bounce)
 	overlay_mat.set_shader_parameter("daylight_strength", _bounce / DEFAULT_BOUNCE)
@@ -208,7 +218,7 @@ func _rect(color: Color) -> ColorRect:
 func set_tier(conf: Dictionary, lava: bool, ground_y: float) -> void:
 	var direction: Vector2 = conf.light_dir.normalized()
 	_shadow_mat.set_shader_parameter("key_direction", direction)
-	_resolve_mat.set_shader_parameter("key_direction", direction)
+	_shadow_resolve_mat.set_shader_parameter("key_direction", direction)
 	_overlay.material.set_shader_parameter("ground_y", ground_y)
 	for light in _tier_lights.get_children():
 		_tier_lights.remove_child(light)
