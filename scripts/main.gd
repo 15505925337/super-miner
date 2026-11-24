@@ -611,7 +611,7 @@ func _start_frame_dump(cmd: Dictionary) -> void:
 		return
 	if count < 1 or count > 9007199254740991 or count != floorf(count):
 		return
-	if _dump_remaining > 0 or JavaScriptBridge.eval("!!(window.dmState.dump && !window.dmState.dump.done)", true) == true:
+	if _dump_remaining > 0 or bool(JavaScriptBridge.eval("!!(window.dmState.dump && !window.dmState.dump.done)", true)):
 		return
 	_dump_name = dump_name
 	_dump_remaining = int(count)
