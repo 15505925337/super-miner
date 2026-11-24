@@ -2,10 +2,21 @@
 extends Node2D
 
 const Cfg = preload("res://scripts/cfg.gd")
-const TEX_OPEN := preload("res://art/claw_1_open.tres")
-const TEX_CLOSED := preload("res://art/claw_1_closed.tres")
+const CLAW_TEXTURES := {
+	"1": [preload("res://art/claw_1_open.tres"), preload("res://art/claw_1_closed.tres")],
+	"2": [preload("res://art/claw_2_open.tres"), preload("res://art/claw_2_closed.tres")],
+	"3": [preload("res://art/claw_3_open.tres"), preload("res://art/claw_3_closed.tres")],
+	"4": [preload("res://art/claw_4_open.tres"), preload("res://art/claw_4_closed.tres")],
+	"5": [preload("res://art/claw_5_open.tres"), preload("res://art/claw_5_closed.tres")],
+}
 const MAT_UNSHADED := preload("res://res/mat_unshaded.tres")
-const RING_FROM_MOUTH := Vector2(0, -156)     # 原图绳环 (128, 56)，爪口判定点 (128, 212)
+const DRAW_SIZE := Vector2.ONE * 60.0 * Cfg.S
+# 用相对画布的位置保留旧版几何。45 格图上绳环约在 (22.5, 9.84)，爪口约在 (22.5, 37.27)。
+const RING_UV := Vector2(0.5, 56.0 / 256.0)
+const MOUTH_UV := Vector2(0.5, 212.0 / 256.0)
+const RING_FROM_MOUTH := (RING_UV - MOUTH_UV) * DRAW_SIZE
+
+var _textures: Array
 
 @onready var rope: Line2D = $Rope
 @onready var rope_edge: Line2D = $RopeEdge
@@ -15,6 +26,11 @@ const RING_FROM_MOUTH := Vector2(0, -156)     # 原图绳环 (128, 56)，爪口�
 
 
 func _ready() -> void:
+	_textures = CLAW_TEXTURES.get(Cfg.args().get("claw", "1"), CLAW_TEXTURES["1"])
+	claw_sprite.texture = _textures[0]
+	var size := claw_sprite.texture.get_size()
+	claw_sprite.scale = DRAW_SIZE / size
+	claw_sprite.offset = (Vector2.ONE * 0.5 - MOUTH_UV) * size
 	if Cfg.args().get("hookdbg", "0") != "1":
 		return
 	var circle := Line2D.new()
@@ -36,11 +52,11 @@ func apply(ang: float, length: float, closed: bool, frozen: bool, strong: bool, 
 	var p := Vector2(sin(ang), cos(ang)) * length
 	claw.position = p
 	claw.rotation = -ang
-	var ring := p + (RING_FROM_MOUTH * claw_sprite.scale).rotated(claw.rotation)
+	var ring := p + RING_FROM_MOUTH.rotated(claw.rotation)
 	var pts := PackedVector2Array([rope_start, Vector2.ZERO, ring])
 	rope.points = pts
 	rope_edge.points = pts
-	claw_sprite.texture = TEX_CLOSED if closed else TEX_OPEN
+	claw_sprite.texture = _textures[1 if closed else 0]
 	rope.default_color = Color(0.77, 0.94, 1.0) if frozen else (Color(1.0, 0.64, 0.24) if strong else rope_color)
 	claw_sprite.modulate = Color(0.6, 0.88, 1.0) if frozen else Color(1, 1, 1)
 

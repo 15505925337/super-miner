@@ -1,7 +1,7 @@
 [gd_scene load_steps=6 format=3]
 
 [ext_resource type="Script" path="res://scripts/hook.gd" id="1"]
-[ext_resource type="Texture2D" path="res://art/claw_1_open.tres" id="2"]
+[ext_resource type="Material" path="res://res/mat_sharp_unshaded.tres" id="2"]
 [ext_resource type="Shader" path="res://shaders/rope.gdshader" id="3"]
 [ext_resource type="Material" path="res://res/mat_unshaded.tres" id="4"]
 
@@ -35,7 +35,5 @@ antialiased = true
 [node name="Claw" type="Node2D" parent="."]
 
 [node name="Sprite" type="Sprite2D" parent="Claw"]
-material = ExtResource("4")
-texture = ExtResource("2")
-offset = Vector2(0, -84)
-scale = Vector2(0.1171875, 0.1171875)
+material = ExtResource("2")
+texture_filter = 4

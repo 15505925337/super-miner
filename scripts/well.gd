@@ -15,8 +15,8 @@ const MAT_ADD := preload("res://res/mat_add.tres")
 const MAT_UNSHADED := preload("res://res/mat_unshaded.tres")
 const ICE := preload("res://art/ice.png")
 const CHEST_OPEN := preload("res://art/chest_open.png")
-const CHEST_OPEN_MAT := preload("res://res/chest_open.tres")
-const CHEST_TEXEL := 1.0 / 3.0   # 1080p 下一个贴图像素对应一个屏幕像素。
+const CHEST_OPEN_MAT := preload("res://res/mat_sharp_unshaded.tres")
+const CHEST_TEXEL := 2.0 / 3.0   # 1080p 下一个贴图像素对应两个屏幕像素。
 const CHEST_GAP := 4.0           # 弹图和矿工画布的间距（游戏像素）。
 const SHAFT := preload("res://shaders/shaft.gdshader")
 const BG_SHADER := preload("res://shaders/bg.gdshader")
@@ -441,7 +441,7 @@ func fx_chest(id: int) -> void:
 	sprite.centered = false
 	sprite.scale = Vector2.ONE * CHEST_TEXEL
 	popup.add_child(sprite)
-	_fx_sequence("spark", Vector2(50, 44) * CHEST_TEXEL, 16.0, popup)
+	_fx_sequence("spark", Vector2(25, 22) * CHEST_TEXEL, 16.0, popup)
 	var tw := popup.create_tween()
 	tw.tween_property(popup, "modulate:a", 1.0, 0.16)
 	tw.tween_interval(1.0)

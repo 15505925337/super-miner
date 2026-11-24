@@ -1,4 +1,4 @@
-// 开箱弹图沿用井内物件的锐利采样，并保持不受环境光影响。
+// 钩爪和开箱弹图沿用井内物件的锐利采样，颜色由各自的显示逻辑控制。
 shader_type canvas_item;
 render_mode unshaded;
 
