@@ -28,8 +28,8 @@ const ITEM_EMISSION := {
 	"key": [Color(1.0, 0.80, 0.36, 0.38), 24.0, 76.0],
 }
 const LAMP_STRENGTH := 0.77
-const LAMP_FALLOFF := 72.0
-const LAMP_REACH := 224.0
+const LAMP_FALLOFF := Vector2(66.0, 137.0)
+const LAMP_REACH := 204.0
 const LAVA_COLOR := Color(1.0, 0.24, 0.08, 0.64)
 const HEAD_COLOR := Color(1.0, 0.88, 0.58, 0.34)
 # 沿用任务 01、02 量出的 52 个头灯灯芯坐标。按原图 512×512 记。
@@ -73,6 +73,7 @@ var _distance_vp: SubViewport
 var _passes: Array[SubViewport] = []
 var _emitters := Node2D.new()
 var _mask_mat := ShaderMaterial.new()
+var _resolve_mat: ShaderMaterial
 var _receive_mat := ShaderMaterial.new()
 var _mask_nodes := {}
 var _moving_lights := {}
@@ -121,9 +122,14 @@ func _ready() -> void:
 
 	var resolve_vp := _viewport(size)
 	resolve_vp.name = "Resolve"
-	var resolve_mat := _pass_material(resolve_vp, SH_RESOLVE)
-	resolve_mat.set_shader_parameter("light_px", Vector2.ONE / Vector2(size))
-	resolve_mat.set_shader_parameter("light_tex", light_vp.get_texture())
+	# RGBA 中的 A 保存井壁遮挡。透明视口配合无混合写入保留四个通道。
+	resolve_vp.transparent_bg = true
+	_resolve_mat = _pass_material(resolve_vp, SH_RESOLVE)
+	_resolve_mat.set_shader_parameter("light_px", Vector2.ONE / Vector2(size))
+	_resolve_mat.set_shader_parameter("light_tex", light_vp.get_texture())
+	_resolve_mat.set_shader_parameter("distance_tex", _distance_vp.get_texture())
+	_resolve_mat.set_shader_parameter("design_size", Vector2(DESIGN_SIZE))
+	_resolve_mat.set_shader_parameter("wall_shadow_strength", _shadow / DEFAULT_SHADOW)
 	# 嵌套视口让遮挡和距离场先于射线渲染，滤波先于主井。
 	resolve_vp.add_child(light_vp)
 	add_child(resolve_vp)
@@ -132,6 +138,7 @@ func _ready() -> void:
 	overlay_mat.shader = SH_BACKGROUND
 	overlay_mat.set_shader_parameter("resolved_tex", resolve_vp.get_texture())
 	overlay_mat.set_shader_parameter("bounce_strength", _bounce)
+	overlay_mat.set_shader_parameter("daylight_strength", _bounce / DEFAULT_BOUNCE)
 	_overlay = ColorRect.new()
 	_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_overlay.size = Vector2(DESIGN_SIZE)
@@ -186,22 +193,25 @@ func _rect(color: Color) -> ColorRect:
 
 
 func set_tier(conf: Dictionary, lava: bool) -> void:
+	_resolve_mat.set_shader_parameter("key_direction", conf.light_dir)
 	for light in _tier_lights.get_children():
 		_tier_lights.remove_child(light)
 		light.queue_free()
 	for pos in conf.lamps:
 		var lamp := _new_light(_tier_lights, Color(conf.light_col, LAMP_STRENGTH),
-			Vector2(LAMP_FALLOFF, LAMP_REACH), 0.0, 24.0)
+			Vector2(LAMP_FALLOFF.y, LAMP_REACH), 0.0, 24.0)
+		lamp.material.set_shader_parameter("falloff_scale", Vector2(LAMP_FALLOFF.y / LAMP_FALLOFF.x, 1.0))
 		lamp.material.set_shader_parameter("light_dir", conf.light_dir)
 		_move_light(lamp, pos)
 	if lava:
-		var magma := _new_light(_tier_lights, LAVA_COLOR, Vector2(34.0, 172.0), 0.0, 30.0, Cfg.GW * 0.5)
+		var magma := _new_light(_tier_lights, LAVA_COLOR, Vector2(96.0, 172.0), 0.0, 30.0, Cfg.GW * 0.5)
 		_move_light(magma, Vector2(Cfg.GW * 0.5, Cfg.GH))
 
 
 func set_dark(dark: float) -> void:
 	_dark = dark
 	_overlay.material.set_shader_parameter("darkness", dark)
+	_resolve_mat.set_shader_parameter("daylight", 1.0 - dark)
 	_receive_mat.set_shader_parameter("light_fade", 1.0 - dark)
 	for light in _tier_lights.get_children():
 		_update_light_fade(light)
