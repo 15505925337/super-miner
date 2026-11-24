@@ -15,8 +15,8 @@ const MAT_ADD := preload("res://res/mat_add.tres")
 const MAT_UNSHADED := preload("res://res/mat_unshaded.tres")
 const ICE := preload("res://art/ice.png")
 const CHEST_OPEN := preload("res://art/chest_open.png")
-const CHEST_OPEN_MAT := preload("res://res/mat_sharp_unshaded.tres")
-const CHEST_TEXEL := 2.0 / 3.0   # 1080p 下一个贴图像素对应两个屏幕像素。
+const MAT_SHARP_UNSHADED := preload("res://res/mat_sharp_unshaded.tres")
+const PIXEL_SCALE := 2.0 / 3.0   # 1080p 下一个贴图像素对应两个屏幕像素。
 const CHEST_GAP := 4.0           # 弹图和矿工画布的间距（游戏像素）。
 const SHAFT := preload("res://shaders/shaft.gdshader")
 const BG_SHADER := preload("res://shaders/bg.gdshader")
@@ -35,10 +35,12 @@ const MINER_POSES := [
 	"pull", "pull2", "happy", "happy2", "sad", "hit", "throw",
 ]
 const FX_SEQUENCES := {
-	"boom": {"count": 6, "duration": 0.5, "coverage": 416.0 / 512.0, "alpha": 0.84},
-	"spark": {"count": 4, "duration": 0.3, "coverage": 336.0 / 512.0, "alpha": 0.95},
-	"dust": {"count": 4, "duration": 0.4, "coverage": 432.0 / 512.0, "alpha": 0.72},
+	"boom": {"count": 6, "duration": 0.5, "alpha": 0.84},
+	"spark": {"count": 4, "duration": 0.3, "alpha": 0.95},
+	"dust": {"count": 4, "duration": 0.4, "alpha": 0.72},
 }
+const FX_SIZES := {"s": 32, "m": 52, "l": 100}
+const FX_COVERAGE := 0.84      # 火花和尘土的可见范围约占画布边长的 84%。
 static var _fx_frames := {}
 static var _chest_ink := Rect2(CHEST_OPEN.get_image().get_used_rect())
 
@@ -91,6 +93,9 @@ var _miners := {}                # 玩家 id → { root, sprite, shadow, hook, f
 var _gi: GI
 var _extra: Array[PointLight2D] = []
 var _chest_popups := {}          # 开箱玩家 id → 弹图节点。
+var _fx_speed := 1.0
+var _fx_sprites: Array[AnimatedSprite2D] = []
+var _fx_tweens: Dictionary[Node, Tween] = {}
 var _t := 0.0
 var _tier := -1
 var _base := Vector2.ZERO         # 这口井在画面上的位置（震动是在它上面加一点偏移）
@@ -215,7 +220,7 @@ func set_view(items: Array, players: Array, info: Dictionary) -> void:
 			_items[id] = n
 			if live and _live_t >= 0.0 and _t - _live_t > 0.6:     # 开挖以后才冒出来的（丢来的石头、金矿雨、塌方）：从小变大弹一下
 				n.scale = Vector2.ONE * 0.15
-				n.create_tween().tween_property(n, "scale", Vector2.ONE, 0.32).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+				_create_fx_tween(n).tween_property(n, "scale", Vector2.ONE, 0.32).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 				fx_flash(Vector2(it.x, it.y) * Cfg.S, 26.0, Color(0.8, 0.72, 0.6), 0.3)
 		n.position = Vector2(it.x, it.y) * Cfg.S
 		n.walk_dx = float(it.get("walk_dx", 0.0))
@@ -249,7 +254,7 @@ func set_view(items: Array, players: Array, info: Dictionary) -> void:
 		m.frame = frame
 		# 动作帧已画好身体起伏，整张图保持固定，让木台贴着台沿。
 		m.root.position = Vector2(x, ledge - MINER_LEDGE_OFFSET)
-		m.ice.visible = int(p.fz) == 1
+		m.ice.visible = int(p.fz) == 1 or _t < float(m.get("preview_ice_until", 0.0))
 		var pivot := Vector2(x, y0)
 		var winch: Vector2 = m.root.position + (WINCH_ROPE_EXIT - sprite_center) * source_scale
 		m.hook.position = pivot
@@ -284,8 +289,9 @@ func _make_miner(c: int) -> Dictionary:
 	root.add_child(shadow)
 	var ice := Sprite2D.new()
 	ice.texture = ICE
-	ice.material = MAT_UNSHADED
-	ice.scale = Vector2.ONE * MINER_SIZE / float(ICE.get_width())
+	ice.material = MAT_SHARP_UNSHADED
+	ice.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+	ice.scale = Vector2.ONE * PIXEL_SCALE
 	ice.modulate.a = 0.48
 	ice.z_index = 63
 	ice.hide()
@@ -393,35 +399,72 @@ func set_gi(on: bool, divisor: int, bounce: float, shadow: float, keep_dark_glow
 	_gi.set_active(on)
 
 
-# 单次播放。用同一组图中可见范围最大的一帧对齐目标尺寸。
-func _fx_sequence(kind: String, pos: Vector2, span: float, parent: Node2D = null) -> void:
+# 存图期间用倍率把引擎的本帧步长换算成存图步长，保留原有帧进度和缓动。
+func set_fx_speed(speed: float) -> void:
+	if speed == _fx_speed:
+		return
+	_fx_speed = speed
+	for sprite in _fx_sprites:
+		sprite.speed_scale = speed
+	for tween in _fx_tweens.values():
+		if tween.is_valid():
+			tween.set_speed_scale(speed)
+
+
+func _create_fx_tween(node: Node) -> Tween:
+	var tween := node.create_tween().set_speed_scale(_fx_speed)
+	_fx_tweens[node] = tween
+	var forget := func(): _fx_tweens.erase(node)
+	node.tree_exiting.connect(forget, CONNECT_ONE_SHOT)
+	tween.finished.connect(forget, CONNECT_ONE_SHOT)
+	return tween
+
+
+# 按画面上的物件边长，找可见范围最接近的一档。
+func _fx_size(span: float) -> String:
+	var closest := "s"
+	var best := INF
+	for size: String in FX_SIZES:
+		var difference := absf(span - float(FX_SIZES[size]) * PIXEL_SCALE * FX_COVERAGE)
+		if difference < best:
+			closest = size
+			best = difference
+	return closest
+
+
+# 单次播放。帧组按类别和档位复用，每个贴图像素的大小固定。
+func _fx_sequence(kind: String, pos: Vector2, size: String = "", parent: Node2D = null) -> void:
 	var conf: Dictionary = FX_SEQUENCES[kind]
-	var frames: SpriteFrames = _fx_frames.get(kind)
+	var prefix := kind if size.is_empty() else "%s_%s" % [kind, size]
+	var frames: SpriteFrames = _fx_frames.get(prefix)
 	if frames == null:
 		frames = SpriteFrames.new()
 		frames.set_animation_loop("default", false)
 		frames.set_animation_speed("default", float(conf.count) / float(conf.duration))
 		for i in range(1, int(conf.count) + 1):
-			frames.add_frame("default", load("res://art/%s_%d.png" % [kind, i]))
-		_fx_frames[kind] = frames
+			frames.add_frame("default", load("res://art/%s_%d.png" % [prefix, i]))
+		_fx_frames[prefix] = frames
 	var s := AnimatedSprite2D.new()
 	s.sprite_frames = frames
-	s.material = MAT_UNSHADED
-	s.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
-	s.scale = Vector2.ONE * span / (float(conf.coverage) * frames.get_frame_texture("default", 0).get_width())
+	s.material = MAT_SHARP_UNSHADED
+	s.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+	s.scale = Vector2.ONE * PIXEL_SCALE
 	s.position = pos
 	s.modulate.a = float(conf.alpha)
+	s.speed_scale = _fx_speed
 	(parent if parent != null else fx_root).add_child(s)
+	_fx_sprites.append(s)
+	s.tree_exiting.connect(func(): _fx_sprites.erase(s), CONNECT_ONE_SHOT)
 	s.animation_finished.connect(s.queue_free)
 	s.play()
 	var duration := float(conf.duration)
-	s.create_tween().tween_property(s, "modulate:a", 0.0, duration * 0.5).set_delay(duration * 0.5)
+	_create_fx_tween(s).tween_property(s, "modulate:a", 0.0, duration * 0.5).set_delay(duration * 0.5)
 
 
 func fx_grab(pos: Vector2, kind: String) -> void:
 	var rock := kind in ["rs", "rl"]
 	var radius := float(Cfg.b().TYPES[Cfg.type_index(kind)].r) * Cfg.S
-	_fx_sequence("dust" if rock else "spark", pos, radius * 2.5)
+	_fx_sequence("dust" if rock else "spark", pos, _fx_size(radius * 2.5))
 	if not rock:
 		fx_flash(pos, radius * 1.5, Color(1.0, 0.95, 0.8), 0.16, 0.4)
 
@@ -436,13 +479,13 @@ func fx_chest(id: int) -> void:
 	_chest_popups[id] = popup
 	var sprite := Sprite2D.new()
 	sprite.texture = CHEST_OPEN
-	sprite.material = CHEST_OPEN_MAT
+	sprite.material = MAT_SHARP_UNSHADED
 	sprite.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
 	sprite.centered = false
-	sprite.scale = Vector2.ONE * CHEST_TEXEL
+	sprite.scale = Vector2.ONE * PIXEL_SCALE
 	popup.add_child(sprite)
-	_fx_sequence("spark", Vector2(25, 22) * CHEST_TEXEL, 16.0, popup)
-	var tw := popup.create_tween()
+	_fx_sequence("spark", Vector2(25, 22) * PIXEL_SCALE, _fx_size(16.0), popup)
+	var tw := _create_fx_tween(popup)
 	tw.tween_property(popup, "modulate:a", 1.0, 0.16)
 	tw.tween_interval(1.0)
 	tw.tween_property(popup, "modulate:a", 0.0, 0.24)
@@ -487,7 +530,7 @@ func layout_chest_popups(to_screen: Transform2D, name_bounds: Array[Rect2]) -> v
 				blocked.append(Rect2(a, b - a).abs().grow(padding))
 	var render := to_screen * get_global_transform()
 	var zoom := render.get_scale().x
-	var texel := zoom * CHEST_TEXEL
+	var texel := zoom * PIXEL_SCALE
 	var field := to_screen * Rect2(_base, Vector2(Cfg.GW, Cfg.GH) * scale)
 	var ledge := (render * Vector2(0, float(TIERS[_tier].ledge) / 3.0)).y
 	var y := roundf(ledge - _chest_ink.end.y * texel)
@@ -551,17 +594,30 @@ func fx_text(pos: Vector2, text: String, color: Color = Color(1, 0.88, 0.29), si
 	l.text = text
 	l.z_index = 2
 	fx_root.add_child(l)
-	var tw := l.create_tween()
+	var tw := _create_fx_tween(l)
 	tw.set_parallel(true)
 	tw.tween_property(l, "position:y", l.position.y - 26.0, 1.2)
 	tw.tween_property(l, "modulate:a", 0.0, 1.2).set_ease(Tween.EASE_IN)
 	tw.chain().tween_callback(l.queue_free)
 
 
-# 爆炸范围用半径换成直径，闪光叠在短暂的火球和烟上面。
+# 火球和烟用固定画布，附加闪光按服务端给的半径绘制。
 func fx_boom(pos: Vector2, radius: float) -> void:
-	_fx_sequence("boom", pos, radius * 2.0)
+	_fx_sequence("boom", pos)
 	fx_flash(pos, radius, Color(1, 0.75, 0.35), 0.32, 0.6)
+
+
+# 网页验收用，只播放指定帧组或临时显示冰层。
+func preview_fx(kind: String, size: String, pos: Vector2) -> void:
+	if kind == "boom":
+		_fx_sequence(kind, pos)
+	elif kind in ["spark", "dust"] and FX_SIZES.has(size):
+		_fx_sequence(kind, pos, size)
+
+
+func preview_ice(id: int) -> void:
+	if _miners.has(id):
+		_miners[id].preview_ice_until = _t + float(Cfg.b().RULES.freezeSecs)
 
 
 func fx_flash(pos: Vector2, radius: float, color: Color, dur: float = 0.4, alpha: float = 1.0) -> void:
@@ -579,7 +635,7 @@ func fx_flash(pos: Vector2, radius: float, color: Color, dur: float = 0.4, alpha
 		var r0 := radius / 64.0 * (0.5 if pass_i == 0 else 0.25)
 		s.scale = Vector2.ONE * r0
 		fx_root.add_child(s)
-		var tw := s.create_tween()
+		var tw := _create_fx_tween(s)
 		tw.set_parallel(true)
 		tw.tween_property(s, "scale", Vector2.ONE * r0 * 3.2, dur).set_ease(Tween.EASE_OUT)
 		tw.tween_property(s, "modulate:a", 0.0, dur)

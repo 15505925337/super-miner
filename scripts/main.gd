@@ -409,7 +409,7 @@ func _unhandled_key_input(e: InputEvent) -> void:
 
 func _process(dt: float) -> void:
 	if _dump_remaining > 0:
-		_update_frame_dump()
+		_update_frame_dump(dt)
 	var visual_dt := Cfg.visual_delta(dt)
 	_frames += 1
 	if _frames == 3 and is_web:
@@ -582,13 +582,23 @@ func _test_hooks() -> void:
 			"frameDump":
 				if local_enabled:
 					_start_frame_dump(cmd)
-			"showChest":
+			"showFx":
+				if not local_enabled or client == null or client.ph() != "play":
+					continue
+				var fw := well_for_field(int(cmd.get("f", 0)))
+				if fw != null:
+					var pos := Vector2(float(cmd.get("x", Cfg.GW * 0.5)), float(cmd.get("y", Cfg.GH * 0.5)))
+					fw.preview_fx(String(cmd.get("k", "")), String(cmd.get("s", "")), pos)
+			"showChest", "showIce":
 				if not local_enabled or client == null or client.ph() != "play":
 					continue
 				var id := int(cmd.get("i", -1))
 				var w := well_for_player(id)
 				if w != null:
-					w.fx_chest(id)
+					if cmd.get("t") == "showChest":
+						w.fx_chest(id)
+					else:
+						w.preview_ice(id)
 			_:
 				if client != null:
 					Net.send(cmd)
@@ -606,10 +616,12 @@ func _start_frame_dump(cmd: Dictionary) -> void:
 	_dump_name = dump_name
 	_dump_remaining = int(count)
 	_dump_index = 0
+	# 同批指令播出的特效留到首张截图再推进。
+	_set_dump_fx_speed(0.0)
 	JavaScriptBridge.eval("window.dmState.dump={name:%s,remaining:%d,pending:0,failed:0,done:false}" % [JSON.stringify(_dump_name), _dump_remaining], true)
 
 
-func _update_frame_dump() -> void:
+func _update_frame_dump(dt: float) -> void:
 	if not Cfg.dumping_frames:
 		# 在下一次 _process 开头切换，整帧用同一个步长。
 		_begin_dump_frames()
@@ -630,6 +642,15 @@ func _update_frame_dump() -> void:
 		Cfg.dump_delta = Cfg.DUMP_STEP
 		if client != null:
 			client.step_dump_view()
+	_set_dump_fx_speed(Cfg.dump_delta / dt if dt > 0.0 else 0.0)
+
+
+func _set_dump_fx_speed(speed: float) -> void:
+	if is_instance_valid(well):
+		well.set_fx_speed(speed)
+	for p in panes:
+		if is_instance_valid(p.well):
+			p.well.set_fx_speed(speed)
 
 
 func _begin_dump_frames() -> void:
@@ -686,12 +707,13 @@ func _end_dump_frames() -> void:
 	_dump_last_draw_at = 0
 	Cfg.dumping_frames = false
 	Cfg.dump_delta = 0.0
+	_set_dump_fx_speed(1.0)
 	if is_instance_valid(client):
 		client.end_dump_view()
 
 
 func _exit_tree() -> void:
-	if Cfg.dumping_frames:
+	if _dump_remaining > 0 or Cfg.dumping_frames:
 		_end_dump_frames()
 
 
