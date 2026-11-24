@@ -24,4 +24,6 @@ tools/dyncheck/run.sh "http://localhost:8066/?test=1" 1,4,7,10 /tmp/dyn
 
 ## 其他
 
+- `console.sh <端口>`：无头 Chrome 打开四层超高档、高档演示局，读浏览器控制台。有着色器编译失败（`shader compilation failed`）或脚本错误就不用往下验了。无头模式下 Godot 的 `--headless` 不编译着色器，这一步只能在浏览器里查。
+
 - `seed.cjs`：`NODE_OPTIONS="--require tools/dyncheck/seed.cjs" ./server.sh 端口` 让服务端用固定随机种子，两个服务端按同样顺序开局，井就一模一样，用于改前改后对比截图（合作局有电脑玩家，每组截图前两个服务都要重启）。
