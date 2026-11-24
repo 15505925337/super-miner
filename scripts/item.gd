@@ -57,7 +57,7 @@ func _ready() -> void:
 	glow.texture = sprite.texture
 	_sprite_mat = ShaderMaterial.new()
 	_sprite_mat.shader = SPRITE_SHADER
-	sprite.material = _sprite_mat
+	sprite.material = _sprite_mat  # 各画质共用锐利采样，按参数启用受光。
 	# 照原型的画法：整张图画成边长 = 碰撞半径 × 2.5 的正方形
 	_radius = float(Cfg.b().TYPES[Cfg.type_index(kind)].r) * Cfg.S
 	var d := _radius * 2.5

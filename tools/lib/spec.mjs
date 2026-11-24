@@ -1,12 +1,15 @@
 // 每张素材怎么处理。文件名（不含扩展名）就是键；素材清单.md 里的文件名以这里为准。
 // 现在用的是"清透光影版"这套图：人物、矿物、钩爪是高清的像素风图，背景是手绘高清图。
-// 它们不缩到 640×360 的像素格，也不压色板，按原样（或缩一半）进游戏，画的时候平滑缩放。
+// 素材按原样或缩小后进游戏，不压色板。井下物件在色块交界处抗锯齿。
 //   kind: hd   会受灯光影响的物件：缩小 shrink 倍，配法线贴图
 //         img  不受灯光影响的图：头像、图标、标题，只缩小
 //         bg   整屏背景：原样用，有损压缩省包体
 //   draw: 这张图在游戏里画多大（原型的 1280×720 坐标），只是备查，实际尺寸在 scripts/ 里按原型的画法算
 const N = { bulge: 1, detail: 0.35, strength: 1.7, smooth: 3 };
 const item = { kind: 'hd', shrink: 2, normal: N, draw: '边长 = 碰撞半径 × 2.5 的正方形' };
+// 中、大、巨型金块及巨石、化石、宝箱共 16 张。原生一格一像素，1920×1080 下每格约一个屏幕像素。
+// 画布格数按服务端碰撞半径 × 3.75 向上对齐到 4 的倍数。法线只从亮度提取凹凸，避免轮廓距离生成的放射条纹。
+const nativeItem = { ...item, shrink: 1, normal: { ...N, bulge: 0 } };
 const miner = { kind: 'hd', shrink: 2, normal: { ...N, bulge: 0.6 }, draw: '128×128，木台底边落在台沿上' };
 const claw = { kind: 'hd', shrink: 1, normal: N, draw: '60×60（含透明边），判定点在爪口中央，绳子接到绳环' };
 const keeper = { kind: 'img', shrink: 1, draw: '商店里的半身像' };
@@ -15,9 +18,9 @@ const icon = { kind: 'img', shrink: 2, draw: '道具栏和商店里的小图标'
 const bg = { kind: 'bg', lossy: 0.9, draw: '1280×720 铺满，地面线在距顶 160 处' };
 
 export const SPEC = {
-  gold_s: item, gold_m: item, gold_l: item, gold_xl: item, rock_s: item, rock_l: item,
-  gem: item, ruby: item, bag: item, tnt: item, beetle: item, beetle_2: item, fossil: item,
-  key: item, chest: item, chest_open: item,
+  gold_s: item, gold_m: nativeItem, gold_l: nativeItem, gold_xl: nativeItem, rock_s: item, rock_l: nativeItem,
+  gem: item, ruby: item, bag: item, tnt: item, beetle: item, beetle_2: item, fossil: nativeItem,
+  key: item, chest: nativeItem, chest_open: nativeItem,
   miner_1: miner, miner_2: miner, miner_3: miner, miner_4: miner,
   miner_1_pull: miner, miner_2_pull: miner, miner_3_pull: miner, miner_4_pull: miner,
   miner_1_happy: miner, miner_2_happy: miner, miner_3_happy: miner, miner_4_happy: miner,
@@ -29,7 +32,7 @@ export const SPEC = {
   home_bg: { ...bg, draw: '首页整屏背景' },
 };
 for (const size of ['s', 'm', 'l', 'xl']) {
-  for (const n of [1, 2, 3]) SPEC[`gold_${size}_${n}`] = item;
+  for (const n of [1, 2, 3]) SPEC[`gold_${size}_${n}`] = SPEC[`gold_${size}`];
 }
 for (const n of [1, 2, 3, 4, 5]) {
   for (const pose of ['open', 'closed']) SPEC[`claw_${n}_${pose}`] = claw;

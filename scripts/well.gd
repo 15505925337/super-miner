@@ -15,6 +15,9 @@ const MAT_ADD := preload("res://res/mat_add.tres")
 const MAT_UNSHADED := preload("res://res/mat_unshaded.tres")
 const ICE := preload("res://art/ice.png")
 const CHEST_OPEN := preload("res://art/chest_open.png")
+const CHEST_OPEN_MAT := preload("res://res/chest_open.tres")
+const CHEST_TEXEL := 1.0 / 3.0   # 1080p 下一个贴图像素对应一个屏幕像素。
+const CHEST_GAP := 4.0           # 弹图和矿工画布的间距（游戏像素）。
 const SHAFT := preload("res://shaders/shaft.gdshader")
 const BG_SHADER := preload("res://shaders/bg.gdshader")
 const LAVA_CRACKS := preload("res://art/relief_3_e.png")
@@ -37,6 +40,7 @@ const FX_SEQUENCES := {
 	"dust": {"count": 4, "duration": 0.4, "coverage": 432.0 / 512.0, "alpha": 0.72},
 }
 static var _fx_frames := {}
+static var _chest_ink := Rect2(CHEST_OPEN.get_image().get_used_rect())
 
 # 以原画为主。井壁、远景和支架共用同一层的调色，环境光只在黑灯事件里压暗。
 #   grade [伽马, 对比度, 饱和度]；grade_tint 各色通道倍率；bag_chest_glow 宝袋和宝箱的黑灯倍率；bloom 泛光强度
@@ -79,12 +83,14 @@ const TIERS := [
 
 var quality: int = Cfg.Q.HIGH
 var fx_on := true
+var chest_layer: Node2D          # 玩法合成画布，以最终屏幕像素绘制开箱弹图。
 var bloom := 0.06                # 当前层要的泛光强度，主场景来读
 var _k := 1.0
 var _items := {}                 # 物件 id → 节点
 var _miners := {}                # 玩家 id → { root, sprite, shadow, hook, frames, ice }
 var _gi: GI
 var _extra: Array[PointLight2D] = []
+var _chest_popups := {}          # 开箱玩家 id → 弹图节点。
 var _t := 0.0
 var _tier := -1
 var _base := Vector2.ZERO         # 这口井在画面上的位置（震动是在它上面加一点偏移）
@@ -191,6 +197,7 @@ func set_view(items: Array, players: Array, info: Dictionary) -> void:
 	_dark_want = float(info.get("dark", 0.0)) if live else 0.0
 	if not live:
 		_live_t = -1.0
+		clear_chest_popups()
 	elif _live_t < 0.0:
 		_live_t = _t
 	var seen := {}
@@ -387,7 +394,7 @@ func set_gi(on: bool, divisor: int, bounce: float, shadow: float, keep_dark_glow
 
 
 # 单次播放。用同一组图中可见范围最大的一帧对齐目标尺寸。
-func _fx_sequence(kind: String, pos: Vector2, span: float) -> void:
+func _fx_sequence(kind: String, pos: Vector2, span: float, parent: Node2D = null) -> void:
 	var conf: Dictionary = FX_SEQUENCES[kind]
 	var frames: SpriteFrames = _fx_frames.get(kind)
 	if frames == null:
@@ -404,7 +411,7 @@ func _fx_sequence(kind: String, pos: Vector2, span: float) -> void:
 	s.scale = Vector2.ONE * span / (float(conf.coverage) * frames.get_frame_texture("default", 0).get_width())
 	s.position = pos
 	s.modulate.a = float(conf.alpha)
-	fx_root.add_child(s)
+	(parent if parent != null else fx_root).add_child(s)
 	s.animation_finished.connect(s.queue_free)
 	s.play()
 	var duration := float(conf.duration)
@@ -420,26 +427,109 @@ func fx_grab(pos: Vector2, kind: String) -> void:
 
 
 func fx_chest(id: int) -> void:
-	var m: Dictionary = _miners.get(id, {})
-	if m.is_empty():
+	if not _miners.has(id) or _chest_popups.has(id):
 		return
-	var pos: Vector2 = m.root.position + m.head.position + Vector2(14, -14)
-	pos.y = maxf(13.0, pos.y)
-	var s := Sprite2D.new()
-	s.texture = CHEST_OPEN
-	s.material = MAT_UNSHADED
-	s.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
-	s.position = pos + Vector2(0, 7)
-	var full_scale := Vector2.ONE * 24.0 / float(CHEST_OPEN.get_width())
-	s.scale = full_scale * 0.4
-	fx_root.add_child(s)
-	var tw := s.create_tween().set_parallel(true)
-	tw.tween_property(s, "position", pos, 0.18).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
-	tw.tween_property(s, "scale", full_scale, 0.18).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-	tw.chain().tween_interval(1.0)
-	tw.chain().tween_property(s, "modulate:a", 0.0, 0.24)
-	tw.chain().tween_callback(s.queue_free)
-	_fx_sequence("spark", pos + Vector2(10, -2), 16.0)
+	var popup := Node2D.new()
+	popup.hide()
+	popup.modulate.a = 0.0
+	chest_layer.add_child(popup)
+	_chest_popups[id] = popup
+	var sprite := Sprite2D.new()
+	sprite.texture = CHEST_OPEN
+	sprite.material = CHEST_OPEN_MAT
+	sprite.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+	sprite.centered = false
+	sprite.scale = Vector2.ONE * CHEST_TEXEL
+	popup.add_child(sprite)
+	_fx_sequence("spark", Vector2(50, 44) * CHEST_TEXEL, 16.0, popup)
+	var tw := popup.create_tween()
+	tw.tween_property(popup, "modulate:a", 1.0, 0.16)
+	tw.tween_interval(1.0)
+	tw.tween_property(popup, "modulate:a", 0.0, 0.24)
+	tw.tween_callback(_remove_chest_popup.bind(id))
+
+
+func has_chest_popups() -> bool:
+	return not _chest_popups.is_empty()
+
+
+func _remove_chest_popup(id: int) -> void:
+	var popup: Node2D = _chest_popups[id]
+	chest_layer.remove_child(popup)
+	popup.queue_free()
+	_chest_popups.erase(id)
+
+
+func clear_chest_popups() -> void:
+	for id in _chest_popups.keys():
+		_remove_chest_popup(id)
+
+
+# 名字在屏幕坐标里，矿工和绳子从各自的井投到同一个坐标系。
+func layout_chest_popups(to_screen: Transform2D, name_bounds: Array[Rect2]) -> void:
+	if _chest_popups.is_empty():
+		return
+	var blocked := name_bounds.duplicate()
+	var miner_bounds := {}
+	for id in _miners:
+		var m: Dictionary = _miners[id]
+		var sprite: Sprite2D = m.sprite
+		var box := to_screen * sprite.get_global_transform() * sprite.get_rect()
+		miner_bounds[id] = box
+		blocked.append(box)
+		if m.hook.visible:
+			var rope: Line2D = m.hook.rope_edge
+			var rope_to_screen := to_screen * rope.get_global_transform()
+			var padding := rope.width * 0.5 * rope_to_screen.get_scale().x + 1.0
+			for i in range(1, rope.points.size()):
+				var a := rope_to_screen * rope.points[i - 1]
+				var b := rope_to_screen * rope.points[i]
+				blocked.append(Rect2(a, b - a).abs().grow(padding))
+	var render := to_screen * get_global_transform()
+	var zoom := render.get_scale().x
+	var texel := zoom * CHEST_TEXEL
+	var field := to_screen * Rect2(_base, Vector2(Cfg.GW, Cfg.GH) * scale)
+	var ledge := (render * Vector2(0, float(TIERS[_tier].ledge) / 3.0)).y
+	var y := roundf(ledge - _chest_ink.end.y * texel)
+	var ink := Rect2(_chest_ink.position * texel, _chest_ink.size * texel).grow(0.5)
+	for id in _chest_popups.keys():
+		if not miner_bounds.has(id):
+			_remove_chest_popup(id)
+			continue
+		var miner: Rect2 = miner_bounds[id]
+		var popup: Node2D = _chest_popups[id]
+		var right := ceilf(miner.end.x + CHEST_GAP * zoom - ink.position.x)
+		var left := floorf(miner.position.x - CHEST_GAP * zoom - ink.end.x)
+		var free_right := _free_chest_x(right, 1.0, y, ink, field, blocked)
+		var x := free_right
+		if free_right != right:
+			var free_left := _free_chest_x(left, -1.0, y, ink, field, blocked)
+			if is_finite(free_left) and (free_left == left or left - free_left < free_right - right):
+				x = free_left
+		popup.visible = is_finite(x)
+		if popup.visible:
+			popup.position = Vector2(x, y)
+			popup.scale = Vector2.ONE * zoom
+			blocked.append(Rect2(popup.position + ink.position, ink.size))
+
+
+# 遇到障碍时移到它另一端，直到同一台沿上有空位或到达井边。
+func _free_chest_x(start: float, direction: float, y: float, ink: Rect2, field: Rect2, blocked: Array[Rect2]) -> float:
+	var x := start
+	var box := Rect2(Vector2(x, y) + ink.position, ink.size)
+	while field.encloses(box):
+		var next := x
+		for obstacle in blocked:
+			if box.intersects(obstacle):
+				if direction > 0.0:
+					next = maxf(next, maxf(x + 1.0, ceilf(obstacle.end.x - ink.position.x)))
+				else:
+					next = minf(next, minf(x - 1.0, floorf(obstacle.position.x - ink.end.x)))
+		if next == x:
+			return x
+		x = next
+		box.position.x = x + ink.position.x
+	return INF
 
 
 # 飘字：从某个位置往上飘、淡出
