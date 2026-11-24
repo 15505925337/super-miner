@@ -5,6 +5,7 @@ const Cfg = preload("res://scripts/cfg.gd")
 const RIM_SHADER := preload("res://shaders/sprite.gdshader")
 const SWEEP_SHADER := preload("res://shaders/gold_sweep.gdshader")
 const BEETLE_FRAMES := [preload("res://art/beetle.tres"), preload("res://art/beetle_2.tres")]
+const RIM_REACH := 3.0  # 从轮廓向内采样的最大距离，单位为游戏像素。
 const SWEEP_DURATION := 0.4
 const SPARK_DURATION := 0.45
 # 光晕半径用碰撞半径的倍数，颜色的透明度是呼吸的中心强度。
@@ -37,7 +38,6 @@ var _sweep := Vector3.ZERO
 var _halo_color := Color.TRANSPARENT
 
 @onready var sprite: Sprite2D = $Sprite
-@onready var rim: Sprite2D = $Sprite/Rim
 @onready var glow: Sprite2D = $Glow
 @onready var shadow: Sprite2D = $Shadow
 @onready var halo: Sprite2D = $Halo
@@ -52,19 +52,16 @@ func _ready() -> void:
 		if shape != 0:
 			art += "_%d" % shape
 	sprite.texture = load("res://art/%s.tres" % art)
-	rim.texture = sprite.texture
 	glow.texture = sprite.texture
 	_rim_mat = ShaderMaterial.new()
 	_rim_mat.shader = RIM_SHADER
-	rim.material = _rim_mat
 	# 照原型的画法：整张图画成边长 = 碰撞半径 × 2.5 的正方形
 	_radius = float(Cfg.b().TYPES[Cfg.type_index(kind)].r) * Cfg.S
 	var d := _radius * 2.5
 	var sc: float = d / float(sprite.texture.get_width())
 	sprite.scale = Vector2(sc, sc)
 	glow.scale = sprite.scale
-	# 描边宽度按游戏像素设定，换算成贴图像素。
-	_rim_mat.set_shader_parameter("rim_px", 0.9 / sc)
+	_rim_mat.set_shader_parameter("rim_px", RIM_REACH / sc)
 	# 金块、石头、化石各自带一个固定的倾斜角度，看着不那么整齐划一
 	if kind in Cfg.TILT:
 		var h := fmod(absf(sin(uid * 12.9898) * 43758.5453), 1.0)
@@ -166,7 +163,6 @@ func _update_walk(dt: float) -> void:
 	if absf(walk_dx) > 0.02:
 		_walk_t += dt
 		sprite.flip_h = walk_dx < 0.0
-		rim.flip_h = sprite.flip_h
 		glow.flip_h = sprite.flip_h
 	else:
 		_walk_t = 0.0
@@ -175,7 +171,6 @@ func _update_walk(dt: float) -> void:
 	if frame_changed:
 		_walk_frame = frame
 		sprite.texture = BEETLE_FRAMES[frame]
-		rim.texture = sprite.texture
 		glow.texture = sprite.texture
 	sprite.position.y = sin(_walk_t * 16.0) * 0.75
 	glow.position.y = sprite.position.y
@@ -220,6 +215,6 @@ func set_look(detail: bool, dark: float, glow_strength: float, rim_strength: flo
 	if not detail:
 		spark.hide()
 	_update_glow()
-	rim.visible = detail and dark < 1.0
+	sprite.material = _rim_mat if detail and dark < 1.0 else null
 	_rim_mat.set_shader_parameter("rim_strength", rim_strength)
 	_rim_mat.set_shader_parameter("light_fade", 1.0 - dark)
