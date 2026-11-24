@@ -138,6 +138,9 @@ func _find_spark_edge(axis: Vector2) -> float:
 
 
 func _process(dt: float) -> void:
+	dt = Cfg.visual_delta(dt)
+	if Cfg.dumping_frames and dt == 0.0:
+		return
 	_t += dt
 	if _detail and kind in Cfg.SPARKLE:
 		_update_spark()

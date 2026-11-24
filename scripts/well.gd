@@ -587,6 +587,9 @@ func fx_flash(pos: Vector2, radius: float, color: Color, dur: float = 0.4, alpha
 
 
 func _process(dt: float) -> void:
+	dt = Cfg.visual_delta(dt)
+	if Cfg.dumping_frames and dt == 0.0:
+		return
 	_t += dt
 	# 震动：每帧随机偏一点，很快衰减
 	if _shake > 0.02:

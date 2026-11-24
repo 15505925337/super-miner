@@ -35,6 +35,7 @@ const SH_UP := preload("res://shaders/bloom_up.gdshader")
 const SH_FINAL := preload("res://shaders/final.gdshader")
 const MAX_LEVELS := 5
 const PANE_SIZE := Vector2i(960, 540)     # 分屏小窗的画布大小（640×360 的 1.5 倍，缩放后还清楚）
+const DUMP_TIMEOUT_MS := 15000
 # 演示局只摆图。各层共享坐标（640×360），大石头放在岩石层左灯和井壁之间。
 const DEMO_LAYOUT := {
 	"gs": Vector2(78, 136), "gm": Vector2(210, 197), "gl": Vector2(96, 273), "gx": Vector2(422, 235),
@@ -85,6 +86,11 @@ var _gi_shadow := GI.DEFAULT_SHADOW
 var _gi_dark_glow := true
 var _demo_view := {}
 var _demo_time := 0.0
+var _dump_name := ""
+var _dump_remaining := 0
+var _dump_index := 0
+var _dump_step_index := -1
+var _dump_last_draw_at := 0
 
 
 func _ready() -> void:
@@ -402,6 +408,9 @@ func _unhandled_key_input(e: InputEvent) -> void:
 
 
 func _process(dt: float) -> void:
+	if _dump_remaining > 0:
+		_update_frame_dump()
+	var visual_dt := Cfg.visual_delta(dt)
 	_frames += 1
 	if _frames == 3 and is_web:
 		_ready_ms = float(JavaScriptBridge.eval("performance.now()", true))
@@ -410,10 +419,10 @@ func _process(dt: float) -> void:
 	# 顿帧：自己刚钩中东西的那几十毫秒，画面停在上一帧不动
 	var view: Dictionary = _last_view
 	if not _demo_view.is_empty():
-		_demo_time = fmod(_demo_time + dt, TAU / 1.4)
+		_demo_time = fmod(_demo_time + visual_dt, TAU / 1.4)
 		_demo_view.players[0].ang = 0.99 * sin(_demo_time * 1.4)
 		view = _demo_view
-	elif _last_view.is_empty() or float(Time.get_ticks_msec()) >= client.hitstop_until:
+	elif Cfg.dumping_frames or _last_view.is_empty() or float(Time.get_ticks_msec()) >= client.hitstop_until:
 		view = client.build_view()
 		_last_view = view
 	var players: Array = view.players
@@ -479,7 +488,7 @@ func _process(dt: float) -> void:
 			# 井的位置在本帧震动后确定，绘制前再对齐台沿。
 			h.chest_well.layout_chest_popups.call_deferred(h.to_screen, name_bounds)
 	# 有面板开着时，把后面的游戏画面虚化、压暗（渐入渐出）
-	_menu = move_toward(_menu, 1.0 if ui.menu_open() else 0.0, dt * 4.0)
+	_menu = move_toward(_menu, 1.0 if ui.menu_open() else 0.0, visual_dt * 4.0)
 	final_mat.set_shader_parameter("menu", _menu if fx_on else 0.0)
 	final_mat.set_shader_parameter("menu_blur", 5.0 * k)
 	var want_bloom: float = well.bloom if not _split else panes[0].well.bloom
@@ -508,7 +517,7 @@ func _process(dt: float) -> void:
 	if is_web and _stat_t >= (0.2 if args.has("test") else 1.0):
 		_stat_t = 0.0
 		JavaScriptBridge.eval("window.dmStats=%s" % JSON.stringify(_stats()), true)
-		if args.has("test") and _demo_view.is_empty():
+		if args.has("test") and (client != null or args.get("test") == "1"):
 			_test_hooks()
 	if _bench_left > 0.0:
 		if _bench_wait > 0.0:
@@ -530,8 +539,8 @@ func _stats() -> Dictionary:
 	}
 
 
-# 自动测试用：把对局的要点公布给网页，并执行网页塞进来的指令（等同于玩家点按钮发出的消息）
-func _test_hooks() -> void:
+# 自动测试用：把对局的要点公布给网页。
+func _test_state() -> Dictionary:
 	var c: Dictionary = client.cur
 	var ps := []
 	for p in client.meta.get("players", []):
@@ -539,28 +548,163 @@ func _test_hooks() -> void:
 		ps.append({"id": int(p.id), "name": p.name, "on": p.on, "bot": p.bot, "m": int(st.get("m", 0)), "e": int(st.get("e", 0)), "s": int(st.get("s", 0)), "a": st.get("a", 0),
 			"cb": int(st.get("cb", 0)), "gc": st.get("gc", -1), "gn": int(st.get("gn", -1)), "hv": st.get("hv", -1), "fi": int(st.get("fi", 0)),
 			"out": int(st.get("out", 0)), "ps": int(st.get("ps", 0)), "r": int(st.get("r", 0)), "tl": st.get("tl", {}), "nx": st.get("nx", {}), "ks": st.get("ks", ""), "km": st.get("km", 0), "ak": st.get("ak", {})})
-	var o := {
+	return {
 		"up": Net.up, "ph": client.ph(), "code": client.meta.get("code", ""), "mode": client.meta.get("mode", ""), "host": client.is_host(), "you": client.my_ids(),
 		"rd": int(c.get("rd", 0)), "dp": int(c.get("dp", 0)), "tl": float(c.get("tl", 0)), "tg": c.get("tg", 0), "te": c.get("te", 0), "players": ps, "toast": client.last_toast,
 		"paused": bool(c.get("paused", false)), "res": c.get("res", {}), "pr": c.get("pr", {}), "split": _split, "items": c.F[0].size() if c.has("F") else -1, "rects": ui.rects(), "k": snappedf(k, 0.001),
 		"keys": client.keys_seen, "fires": client.fires_sent, "focus": _focus_name(),
 		"ev": c.get("ev", []), "ky": int(c.get("ky", 0)), "emo": client.emo_seen, "evn": client.ev_seen, "sfx": Sfx.played, "muted": Sfx.muted, "fk": _field_kinds(c),
 	}
-	client.auto_gx = bool(JavaScriptBridge.eval("!!window.dmAutoGx", true))
-	client.auto = bool(JavaScriptBridge.eval("!!window.dmAuto", true))
-	var q = JavaScriptBridge.eval("(function(){window.dmState=%s;var q=window.dmQ||[];window.dmQ=[];return JSON.stringify(q)})()" % JSON.stringify(o), true)
-	if q is String and q.length() > 2:
-		for cmd in JSON.parse_string(q):
-			if not cmd is Dictionary:
-				continue
-			if cmd.get("t") != "showChest":
-				Net.send(cmd)
-				continue
-			if String(args.get("test", "")) == "1" and client.ph() == "play":
+
+
+func _test_hooks() -> void:
+	var state := {}
+	if client != null:
+		state = _test_state()
+		client.auto_gx = bool(JavaScriptBridge.eval("!!window.dmAutoGx", true))
+		client.auto = bool(JavaScriptBridge.eval("!!window.dmAuto", true))
+	var q = JavaScriptBridge.eval("""(() => {
+		const dump = window.dmState?.dump;
+		window.dmState = %s;
+		if (dump) window.dmState.dump = dump;
+		const q = window.dmQ || [];
+		window.dmQ = [];
+		return JSON.stringify(q);
+	})()""" % JSON.stringify(state), true)
+	var commands = JSON.parse_string(q) if q is String and q.length() > 2 else null
+	if not commands is Array:
+		return
+	var local_enabled: bool = args.get("test") == "1"
+	for cmd in commands:
+		if not cmd is Dictionary:
+			continue
+		match cmd.get("t"):
+			"frameDump":
+				if local_enabled:
+					_start_frame_dump(cmd)
+			"showChest":
+				if not local_enabled or client == null or client.ph() != "play":
+					continue
 				var id := int(cmd.get("i", -1))
 				var w := well_for_player(id)
 				if w != null:
 					w.fx_chest(id)
+			_:
+				if client != null:
+					Net.send(cmd)
+
+
+func _start_frame_dump(cmd: Dictionary) -> void:
+	var count = cmd.get("n", 0)
+	var dump_name = cmd.get("name", "frame")
+	if not dump_name is String or not (count is int or count is float):
+		return
+	if count < 1 or count > 9007199254740991 or count != floorf(count):
+		return
+	if _dump_remaining > 0 or bool(JavaScriptBridge.eval("!!(window.dmState.dump && !window.dmState.dump.done)", true)):
+		return
+	_dump_name = dump_name
+	_dump_remaining = int(count)
+	_dump_index = 0
+	JavaScriptBridge.eval("window.dmState.dump={name:%s,remaining:%d,pending:0,failed:0,done:false}" % [JSON.stringify(_dump_name), _dump_remaining], true)
+
+
+func _update_frame_dump() -> void:
+	if not Cfg.dumping_frames:
+		# 在下一次 _process 开头切换，整帧用同一个步长。
+		_begin_dump_frames()
+	var missed := _expire_dump_if_stalled(Time.get_ticks_msec())
+	if missed > 0:
+		JavaScriptBridge.eval("""(() => {
+			const dump = window.dmState.dump;
+			dump.remaining = 0;
+			dump.failed += %d;
+			dump.error = 'render_timeout';
+			dump.done = dump.pending === 0;
+		})()""" % missed, true)
+		return
+	# 等上一帧画完再推进，停绘期间的 _process 不累计动画时间。
+	Cfg.dump_delta = 0.0
+	if _dump_step_index != _dump_index:
+		_dump_step_index = _dump_index
+		Cfg.dump_delta = Cfg.DUMP_STEP
+		if client != null:
+			client.step_dump_view()
+
+
+func _begin_dump_frames() -> void:
+	Cfg.dumping_frames = true
+	_dump_last_draw_at = Time.get_ticks_msec()
+	_dump_step_index = -1
+	if client != null:
+		client.begin_dump_view(_dump_remaining)
+	RenderingServer.frame_post_draw.connect(_dump_frame)
+
+
+func _dump_frame() -> void:
+	_dump_last_draw_at = Time.get_ticks_msec()
+	var name_in_file := "dump_%s_%03d_f%d" % [_dump_name, _dump_index, Engine.get_frames_drawn()]
+	var img := get_viewport().get_texture().get_image()
+	_dump_index += 1
+	_dump_remaining -= 1
+	if _dump_remaining == 0:
+		_end_dump_frames()
+	# 截取下一帧不等上传，所有请求结算后才标记完成。
+	var js := """(() => {
+		const dump = window.dmState.dump;
+		dump.remaining = %d;
+		dump.pending++;
+		const controller = new AbortController();
+		let timer;
+		const deadline = new Promise((_, reject) => {
+			timer = setTimeout(() => { controller.abort(); reject(new Error('upload_timeout')); }, %d);
+		});
+		const upload = Promise.resolve().then(() => %s);
+		Promise.race([upload, deadline]).then(response => { if (!response.ok) dump.failed++; })
+			.catch(() => { dump.failed++; })
+			.finally(() => {
+				clearTimeout(timer);
+				dump.pending--;
+				dump.done = dump.remaining === 0 && dump.pending === 0;
+			});
+	})()""" % [_dump_remaining, DUMP_TIMEOUT_MS, _shot_request(name_in_file, img, "controller.signal")]
+	JavaScriptBridge.eval(js, true)
+
+
+func _expire_dump_if_stalled(now: int) -> int:
+	if _dump_remaining == 0 or now - _dump_last_draw_at < DUMP_TIMEOUT_MS:
+		return 0
+	var missed := _dump_remaining
+	_end_dump_frames()
+	return missed
+
+
+func _end_dump_frames() -> void:
+	if RenderingServer.frame_post_draw.is_connected(_dump_frame):
+		RenderingServer.frame_post_draw.disconnect(_dump_frame)
+	_dump_remaining = 0
+	_dump_last_draw_at = 0
+	Cfg.dumping_frames = false
+	Cfg.dump_delta = 0.0
+	if is_instance_valid(client):
+		client.end_dump_view()
+
+
+func _exit_tree() -> void:
+	if Cfg.dumping_frames:
+		_end_dump_frames()
+
+
+func _shot_request(shot_name: String, img: Image, abort_signal := "") -> String:
+	if img == null or img.is_empty():
+		return "Promise.reject()"
+	var png := img.save_png_to_buffer()
+	if png.is_empty():
+		return "Promise.reject()"
+	var b64 := Marshalls.raw_to_base64(png)
+	var url := JSON.stringify("/__shot?name=" + shot_name.uri_encode())
+	var signal_option := "" if abort_signal.is_empty() else ",signal:" + abort_signal
+	return "fetch(%s,{method:'POST',body:Uint8Array.from(atob('%s'),c=>c.charCodeAt(0))%s})" % [url, b64, signal_option]
 
 
 # 每口井里各种东西有几个（联调脚本用它确认"井里多了石头""掉了金块"）
@@ -613,8 +757,7 @@ func _shot(shot_name: String) -> void:
 	await RenderingServer.frame_post_draw
 	var img := get_viewport().get_texture().get_image()
 	if is_web:
-		var b64 := Marshalls.raw_to_base64(img.save_png_to_buffer())
-		JavaScriptBridge.eval("fetch('/__shot?name=%s',{method:'POST',body:Uint8Array.from(atob('%s'),c=>c.charCodeAt(0))}).then(()=>{window.dmShotDone='%s'})" % [shot_name, b64, shot_name], true)
+		JavaScriptBridge.eval("%s.then(()=>{window.dmShotDone=%s}).catch(()=>{})" % [_shot_request(shot_name, img), JSON.stringify(shot_name)], true)
 	else:
 		var shot_dir := ProjectSettings.globalize_path("res://shots")
 		var err := DirAccess.make_dir_recursive_absolute(shot_dir)

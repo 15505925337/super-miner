@@ -32,6 +32,10 @@ var _visibility_callback: JavaScriptObject
 var _solo_best := {"round": 0, "total": 0}
 var solo_character := 0
 var _tick_s := -1                # 最后几秒的滴答声响到第几秒了
+var _dump_ms := 0.0
+var _dump_idle_t := 0.0
+var _dump_until := 0.0
+var _dump_states: Array[Dictionary] = []
 
 const EMOTE_KEYS := [KEY_Z, KEY_X, KEY_C, KEY_V, KEY_B, KEY_N]
 const EMOTE_KEY_NAMES := ["Z", "X", "C", "V", "B", "N"]
@@ -39,6 +43,7 @@ const EMOTE_KEY_NAMES := ["Z", "X", "C", "V", "B", "N"]
 const CRANK := ["crank1", "crank2", "crank3", "crank4"]
 const STRAIN := ["pull", "pull2"]
 const HEAVY_WEIGHT := 5.0
+const SNAPSHOT_DELAY_MS := 45.0
 
 const DEMO_ITEMS := [
 	{"id": -1, "t": 0, "x": 300, "y": 330, "by": 0}, {"id": -2, "t": 2, "x": 900, "y": 470, "by": 0}, {"id": -3, "t": 4, "x": 600, "y": 580, "by": 0},
@@ -197,6 +202,7 @@ func _on_meta(m: Dictionary) -> void:
 		cur = {}
 		_miner_reactions.clear()
 		_miner_motion.clear()
+		_dump_states.clear()
 		shop_seat = 0
 	meta = m
 	Net.set_url_room(String(m.code))
@@ -221,6 +227,8 @@ func _on_state(m: Dictionary) -> void:
 		m["fm"] = fm
 	prev = cur
 	cur = m
+	if Cfg.dumping_frames:
+		_record_dump_state(m)
 	if solo_paused():
 		_pred.clear()
 	if _tab_hidden and not solo_paused() and String(prev.get("ph", "")) != ph():
@@ -252,6 +260,7 @@ func _reset() -> void:
 	_miner_reactions.clear()
 	_miner_motion.clear()
 	_pred.clear()
+	_dump_states.clear()
 	Net.set_url_room("")
 	changed.emit()
 
@@ -260,7 +269,7 @@ func _on_event(e: Dictionary) -> void:
 	if main == null:
 		return
 	var s: float = Cfg.S
-	var now := float(Time.get_ticks_msec())
+	var now := visual_msec()
 	var fun: Dictionary = Cfg.b().FUN
 	var en := String(e.get("e", ""))
 	ev_seen[en] = int(ev_seen.get(en, 0)) + 1
@@ -288,7 +297,8 @@ func _on_event(e: Dictionary) -> void:
 					tip = Vector2(float(p.x), float(Cfg.b().Y0)) + Vector2(sin(ang), cos(ang)) * float(p.l)
 				well.fx_grab(tip * s, kind)
 			if mine:                                     # 自己钩中：画面顿一下，值钱的顿得久一点
-				hitstop_until = now + (45.0 if rock else 75.0)
+				var real_now := float(Time.get_ticks_msec()) if Cfg.dumping_frames else now
+				hitstop_until = real_now + (45.0 if rock else 75.0)
 				if well != null:
 					well.shake(0.8 if rock else 1.2)
 			Sfx.play("thud" if rock else "grab", 1.0, 0.0 if mine else -8.0)
@@ -393,21 +403,21 @@ func _react(id: int, pose: String, now: float) -> void:
 	reactions[pose] = now
 
 
-func _haul_speed(c: Dictionary, p: Dictionary, weight: float) -> float:
+func _haul_speed(c: Dictionary, p: Dictionary, weight: float, snapshot_dt: float) -> float:
 	if c.has("hv"):
 		return 0.0
 	# 用快照里的游戏时间和收绳量，连同合拉、大力和帮拉角度的影响一起反映到动作中。
 	if not p.is_empty() and int(c.it) == int(p.it) and int(c.s) == int(p.s) and int(p.fz) == 0:
-		var dt := float(prev.tl) - float(cur.tl)
-		if dt > 0.0:
-			return maxf(0.0, (float(p.l) - float(c.l)) / dt)
+		if snapshot_dt > 0.0:
+			return maxf(0.0, (float(p.l) - float(c.l)) / snapshot_dt)
 	var b := Cfg.b()
 	var role := Cfg.character(pcharacter(int(c.i)))
 	var heavy := float(role.get("heavyMul", 1.0)) if weight >= float(role.get("heavyMin", INF)) else 1.0
 	return float(b.HAUL_V) / weight * (float(b.STRONG) if int(c.sg) == 1 else 1.0) * heavy
 
 
-func _miner_frame(o: Dictionary, c: Dictionary, p: Dictionary, now: float, paused: bool) -> String:
+func _miner_frame(o: Dictionary, c: Dictionary, p: Dictionary, now: float, paused: bool,
+		state: Dictionary, snapshot_dt: float) -> String:
 	var anim: Dictionary = _miner_motion.get_or_add(int(o.id), {"frame": "idle", "cycle": 0.0, "motion": "", "at": now})
 	var dt := (now - float(anim.at)) / 1000.0
 	anim.at = now
@@ -423,10 +433,10 @@ func _miner_frame(o: Dictionary, c: Dictionary, p: Dictionary, now: float, pause
 		motion = "crank"
 		fps = 12.0 * float(Cfg.character(int(o.c)).get("emptyHookMul", 1.0))
 	elif st == 2 or st == 4:
-		var items: Dictionary = cur.fm[int(o.fi)] if cur.has("fm") and int(o.fi) < cur.fm.size() else {}
+		var items: Dictionary = state.fm[int(o.fi)] if state.has("fm") and int(o.fi) < state.fm.size() else {}
 		var it: Array = items.get(int(c.it), [])
 		var weight := float(Cfg.b().TYPES[int(it[1])].w) if not it.is_empty() else 1.0
-		var speed := _haul_speed(c, p, weight)
+		var speed := _haul_speed(c, p, weight, snapshot_dt)
 		if weight >= HEAVY_WEIGHT and int(o.sg) == 0:
 			motion = "strain"
 			fps = minf(10.0, 2.8 + speed / 90.0)
@@ -479,7 +489,7 @@ func fire_seat(seat: int) -> void:
 		# 判定还是服务端的，这里只是不让手上感觉到那几十毫秒的来回
 		var c: Dictionary = pstate(ids[seat])
 		if not c.is_empty() and int(c.s) == 0 and int(c.fz) == 0 and int(c.out) == 0 and not _pred.has(ids[seat]):
-			_pred[ids[seat]] = {"t": float(Time.get_ticks_msec()), "ang": ang}
+			_pred[ids[seat]] = {"t": visual_msec(), "ang": ang}
 			Sfx.play("fire")
 
 
@@ -610,23 +620,96 @@ func time_left() -> float:
 	return maxf(0.0, float(cur.tl) - elapsed)
 
 
+func visual_msec() -> float:
+	return _dump_ms if Cfg.dumping_frames else float(Time.get_ticks_msec())
+
+
+func begin_dump_view(frame_count: int) -> void:
+	_dump_ms = float(Time.get_ticks_msec())
+	_dump_idle_t = _t
+	_dump_until = _dump_ms + frame_count * Cfg.DUMP_STEP * 1000.0
+	_dump_states.clear()
+	for anim in _miner_motion.values():
+		anim.at = _dump_ms
+	if cur.is_empty():
+		return
+	var at := float(cur._t)
+	if not prev.is_empty():
+		_dump_states.append({"at": at - _dump_snapshot_interval(prev, cur), "state": prev})
+	_dump_states.append({"at": at, "state": cur})
+
+
+func step_dump_view() -> void:
+	_dump_ms += Cfg.DUMP_STEP * 1000.0
+	_dump_idle_t += Cfg.DUMP_STEP
+
+
+func end_dump_view() -> void:
+	_dump_states.clear()
+	var now := float(Time.get_ticks_msec())
+	# 切回实时时钟时保留动作、喊话和出钩预判已播放的时长。
+	var offset := now - _dump_ms
+	for reactions in _miner_reactions.values():
+		for pose in reactions:
+			if pose != "result":
+				reactions[pose] += offset
+	for emote in _emo.values():
+		emote.t += offset
+	for prediction in _pred.values():
+		prediction.t += offset
+	for anim in _miner_motion.values():
+		anim.at = now
+
+
+func _dump_snapshot_interval(before: Dictionary, state: Dictionary) -> float:
+	# 浏览器忙着编码 PNG 时，几组消息可能在同一帧一起到达。用对局倒计时还原消息间隔。
+	if before.rd == state.rd and before.ph == state.ph and not bool(before.get("paused", false)):
+		var elapsed := (float(before.tl) - float(state.tl)) * 1000.0
+		if elapsed > 0.0 and elapsed <= 101.0:
+			return elapsed
+	return 33.0
+
+
+func _record_dump_state(state: Dictionary) -> void:
+	if _dump_states.is_empty():
+		_dump_states.append({"at": _dump_ms, "state": state})
+		return
+	var last: Dictionary = _dump_states.back()
+	# 保留覆盖本批帧数的快照。客户端照常接收其余快照，不把它们积在存图队列里。
+	if float(last.at) < _dump_until:
+		_dump_states.append({"at": float(last.at) + _dump_snapshot_interval(last.state, state), "state": state})
+
+
 # ───── 每一帧：算出每口井该画什么 ─────
 func build_view() -> Dictionary:
 	var b := Cfg.b()
-	var now := float(Time.get_ticks_msec())
-	var phase := ph()
+	var now := visual_msec()
+	var state := cur
+	var before := prev
+	var at := float(cur.get("_t", now))
+	var before_at := float(prev.get("_t", at))
+	if Cfg.dumping_frames and not _dump_states.is_empty():
+		while _dump_states.size() > 2 and float(_dump_states[1].at) <= now - SNAPSHOT_DELAY_MS:
+			_dump_states.pop_front()
+		var first: Dictionary = _dump_states[0]
+		var second: Dictionary = _dump_states[mini(1, _dump_states.size() - 1)]
+		before = first.state
+		state = second.state
+		before_at = float(first.at)
+		at = float(second.at)
+	var phase := String(state.ph) if Cfg.dumping_frames and not state.is_empty() else ph()
 	var live := phase == "play" or phase == "count"
 	var paused := solo_paused()
 	# 服务端每秒 30 帧，这里在最近两帧之间插值，画面才顺（故意比最新一帧慢 45 毫秒）
 	var a := 1.0
-	if live and not paused and prev.has("F") and not bool(prev.get("paused", false)) and float(cur._t) > float(prev._t):
-		a = clampf((now - 45.0 - float(prev._t)) / (float(cur._t) - float(prev._t)), 0.0, 1.4)
+	if live and not paused and before.has("F") and not bool(before.get("paused", false)) and at > before_at:
+		a = clampf((now - SNAPSHOT_DELAY_MS - before_at) / (at - before_at), 0.0, 1.0 if Cfg.dumping_frames else 1.4)
 	var fields := []
-	if live and cur.has("F"):
-		for fi in cur.F.size():
+	if live and state.has("F"):
+		for fi in state.F.size():
 			var arr := []
-			var pmap: Dictionary = prev.fm[fi] if prev.has("fm") and fi < prev.fm.size() else {}
-			for c in cur.F[fi]:
+			var pmap: Dictionary = before.fm[fi] if before.has("fm") and fi < before.fm.size() else {}
+			for c in state.F[fi]:
 				var x := float(c[2])
 				var y := float(c[3])
 				var by := int(c[4])
@@ -646,21 +729,22 @@ func build_view() -> Dictionary:
 	var n := list.size()
 	var players := []
 	var multi_local := my_ids().size() > 1
+	var idle_t := _dump_idle_t if Cfg.dumping_frames else _t
 	for idx in n:
 		var mp: Dictionary = list[idx]
 		var id := int(mp.id)
 		var seat := seat_of(id)
 		var o := {
 			"id": id, "name": String(mp.name), "c": pcharacter(id), "x": roundf(float(b.W) * (idx + 1) / (n + 1)), "fi": 0, "out": 0, "ps": 0,
-			"ang": float(b.AMP) * sin(_t * float(b.SWING) * 0.55 + idx * 1.7), "len": float(b.MINL), "st": 0, "fz": 0, "sg": 0, "seat": seat, "tag": "", "hint": "", "m": 0, "frame": "idle", "on": bool(mp.get("on", true)),
+			"ang": float(b.AMP) * sin(idle_t * float(b.SWING) * 0.55 + idx * 1.7), "len": float(b.MINL), "st": 0, "fz": 0, "sg": 0, "seat": seat, "tag": "", "hint": "", "m": 0, "frame": "idle", "on": bool(mp.get("on", true)),
 		}
-		var c: Dictionary = pstate(id)
+		var c: Dictionary = state.get("pm", {}).get(id, {})
 		if not c.is_empty():
 			o.m = int(c.m)
 			o.out = int(c.out)
 			o.ps = int(c.ps)
 			if live:
-				var p: Dictionary = prev.get("pm", {}).get(id, {}) if prev.has("F") else {}
+				var p: Dictionary = before.get("pm", {}).get(id, {}) if before.has("F") else {}
 				if not p.is_empty() and absf(float(c.l) - float(p.l)) < 200.0:
 					o.ang = float(p.a) + (float(c.a) - float(p.a)) * a
 					o.len = float(p.l) + (float(c.l) - float(p.l)) * a
@@ -686,14 +770,14 @@ func build_view() -> Dictionary:
 						_pred.erase(id)
 				o.fz = int(c.fz)
 				o.sg = int(c.sg)
-				o.frame = _miner_frame(o, c, p, now, paused)
+				o.frame = _miner_frame(o, c, p, now, paused, state, float(before.get("tl", 0)) - float(state.tl))
 				# 矿工头上那行字：对战和分屏显示各自的钱；本机多人时再带上各自的道具和按键
 				var tag := Cfg.money(o.m) if mode() != "co" else ""
 				if int(c.sg) == 1:
 					tag += " 大力"
 				if int(c.get("cb", 0)) > 0 and o.out == 0:   # 分屏：连续钩中几次了，凑够就丢石头
 					tag += " 连钩%d/%d" % [int(c.cb), int(c.get("cn", 0))]
-				if mode() == "co" and int(cur.get("ky", 0)) == id:
+				if mode() == "co" and int(state.get("ky", 0)) == id:
 					tag += " 拿着钥匙"
 				o.tag = tag
 				if c.has("hv"):                              # 合作：吊着巨型金块拉不动
@@ -716,7 +800,7 @@ func build_view() -> Dictionary:
 		view_ang[id] = o.ang
 		players.append(o)
 
-	var depth := int(cur.get("dp", 1)) if not cur.is_empty() else 1
+	var depth := int(state.get("dp", 1)) if not state.is_empty() else 1
 	var tier: int = Cfg.tier_of(depth) if phase != "" and phase != "lobby" else 1
 	if Cfg.args().has("tier"):
 		tier = clampi(int(Cfg.args()["tier"]), 0, 3)
@@ -727,23 +811,23 @@ func build_view() -> Dictionary:
 		plate = "%s · 地下 %d 米" % [b.LAYERS[tier], depth * 30]
 		clock = "%d 秒" % ceili(time_left()) if phase == "play" or mode() == "solo" else ""
 		if mode() == "vs":
-			plank = "第 %d / %d 局" % [int(cur.rd), int(meta.rounds)]
+			plank = "第 %d / %d 局" % [int(state.rd), int(meta.rounds)]
 		elif mode() == "co":
-			plank = "第 %d 关　%s / %s" % [int(cur.rd), Cfg.money(cur.get("te", 0)), Cfg.money(cur.get("tg", 0))]
+			plank = "第 %d 关　%s / %s" % [int(state.rd), Cfg.money(state.get("te", 0)), Cfg.money(state.get("tg", 0))]
 		elif mode() == "solo":
-			var me: Dictionary = pstate(my_ids()[0]) if not my_ids().is_empty() else {}
-			plank = "第 %d 关　%s / %s" % [int(cur.rd), Cfg.money(me.get("m", 0)), Cfg.money(cur.get("tg", 0))]
+			var me: Dictionary = state.get("pm", {}).get(my_ids()[0], {}) if not my_ids().is_empty() else {}
+			plank = "第 %d 关　%s / %s" % [int(state.rd), Cfg.money(me.get("m", 0)), Cfg.money(state.get("tg", 0))]
 		else:
-			plank = "第 %d 关　目标 %s" % [int(cur.rd), Cfg.money(cur.get("tg", 0))]
+			plank = "第 %d 关　目标 %s" % [int(state.rd), Cfg.money(state.get("tg", 0))]
 	# 这一关的随机事件：倒计时的时候大字预告，开挖后在顶上写还有几秒
 	var event := ""
 	var event_big := ""
 	var event_sub := ""
 	var dark := 0.0
-	if live and cur.has("ev"):
-		var ev: Array = cur.ev
+	if live and state.has("ev"):
+		var ev: Array = state.ev
 		var conf: Dictionary = b.FUN.events.get(String(ev[0]), {})
-		var secs: float = maxf(0.0, float(ev[2]) - (now - float(cur._t)) / 1000.0) if phase == "play" and not paused else float(ev[2])
+		var secs: float = maxf(0.0, float(ev[2]) - (now - at) / 1000.0) if phase == "play" and not paused else float(ev[2])
 		if phase == "count":
 			event_big = "本关事件：%s" % String(conf.get("n", ""))
 			event_sub = String(conf.get("d", ""))
@@ -755,9 +839,9 @@ func build_view() -> Dictionary:
 	# 分屏里自己被淘汰了：提示可以丢石头
 	var note := ""
 	if live and mode() == "race" and my_ids().size() > 0:
-		var me: Dictionary = pstate(my_ids()[0])
+		var me: Dictionary = state.get("pm", {}).get(my_ids()[0], {})
 		if int(me.get("out", 0)) == 1 and me.has("gn"):
-			var gc: float = maxf(0.0, float(me.get("gc", 0.0)) - (now - float(cur._t)) / 1000.0)
+			var gc: float = maxf(0.0, float(me.get("gc", 0.0)) - (now - at) / 1000.0)
 			if int(me.gn) <= 0:
 				note = "你淘汰了。这一关的石头丢完了"
 			elif gc > 0.0:

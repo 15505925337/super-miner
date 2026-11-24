@@ -4,6 +4,7 @@ extends RefCounted
 const GW := 640                      # 设计基准宽（游戏像素）
 const GH := 360                      # 设计基准高
 const S := 0.5                       # 服务端坐标（原型的 1280×720）换成游戏像素要乘的倍数
+const DUMP_STEP := 1.0 / 60.0        # 测试存图期间，本地画面每帧推进的秒数。
 
 enum Q { LOW, MID, HIGH, ULTRA }
 const Q_NAMES := ["low", "mid", "high", "ultra"]
@@ -41,6 +42,12 @@ static var _args := {}
 static var _args_done := false
 static var _font: Font = null
 static var _font_done := false
+static var dumping_frames := false
+static var dump_delta := 0.0
+
+
+static func visual_delta(dt: float) -> float:
+	return dump_delta if dumping_frames else dt
 
 
 # 数值表
