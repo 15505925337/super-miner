@@ -9,7 +9,10 @@
 # 画面按 640×360 设计。窗口正好是整数倍时用整数倍；不是整数倍时按比例放大到铺满（用户定的）。
 #
 # 启动参数（桌面版写在 -- 后面，如 -- --q=mid；网页版写在网址问号后面，如 ?q=mid&r=1234）：
-#   q=high|mid|low   画质            fx=0          关掉全部光影
+#   q=ultra|high|mid|low  画质       fx=0          关掉全部光影
+#   gi=0|1           超高档全局光照  gib/gis/gir   反光、阴影、分辨率除数
+#   gid=0            关掉黑灯时值钱物件的彩光（默认保留）
+#   demo=1           固定演示局      dark=1       演示局固定黑灯
 #   r=<房间号>       直接进这个房间   name=<名字>   玩家名字
 #   server=<地址>    服务端地址（桌面版用，默认 ws://127.0.0.1:8060）
 #   tier=0..3        强制显示第几层的画面（只影响显示，看图用）
@@ -24,11 +27,18 @@ const Cfg = preload("res://scripts/cfg.gd")
 const WELL := preload("res://scenes/well.tscn")
 const CLIENT := preload("res://scripts/client.gd")
 const UI := preload("res://scripts/ui.gd")
+const GI := preload("res://scripts/gi.gd")
 const SH_DOWN := preload("res://shaders/bloom_down.gdshader")
 const SH_UP := preload("res://shaders/bloom_up.gdshader")
 const SH_FINAL := preload("res://shaders/final.gdshader")
 const MAX_LEVELS := 5
 const PANE_SIZE := Vector2i(960, 540)     # 分屏小窗的画布大小（640×360 的 1.5 倍，缩放后还清楚）
+# 演示局只摆图。各层共享坐标（640×360），大石头放在岩石层左灯和井壁之间。
+const DEMO_LAYOUT := {
+	"gs": Vector2(78, 136), "gm": Vector2(210, 197), "gl": Vector2(96, 273), "gx": Vector2(422, 235),
+	"gem": Vector2(305, 255), "rub": Vector2(485, 157), "bug": Vector2(552, 279), "key": Vector2(358, 165),
+	"rl": Vector2(158, 132), "rs": Vector2(475, 310), "tnt": Vector2(556, 192), "bag": Vector2(205, 303),
+}
 
 var quality: int = Cfg.Q.HIGH
 var fx_on := true
@@ -65,6 +75,14 @@ var _bloom := -1.0
 var _focus_t := 0.0
 var _menu := 0.0
 var _last_view := {}
+var _gi_requested := true
+var _gi_active := false
+var _gi_divisor := GI.DEFAULT_DIVISOR
+var _gi_bounce := GI.DEFAULT_BOUNCE
+var _gi_shadow := GI.DEFAULT_SHADOW
+var _gi_dark_glow := true
+var _demo_view := {}
+var _demo_time := 0.0
 
 
 func _ready() -> void:
@@ -73,6 +91,15 @@ func _ready() -> void:
 	var qi := Cfg.Q_NAMES.find(String(args.get("q", "high")))
 	quality = qi if qi >= 0 else Cfg.Q.HIGH
 	fx_on = String(args.get("fx", "1")) != "0"
+	_gi_requested = String(args.get("gi", "1")) != "0"
+	var divisor := String(args.get("gir", str(GI.DEFAULT_DIVISOR)))
+	if divisor in ["1", "2", "4"]:
+		_gi_divisor = int(divisor)
+	_gi_bounce = _gi_strength("gib", GI.DEFAULT_BOUNCE)
+	_gi_shadow = _gi_strength("gis", GI.DEFAULT_SHADOW)
+	_gi_dark_glow = args.get("gid", "1") == "1"
+	if args.get("demo", "0") == "1":
+		_prepare_demo()
 
 	# 分屏用的四块小画布，要排在玩法层前面，保证同一帧里先画好
 	for i in int(Cfg.b().MAXP):
@@ -140,13 +167,15 @@ func _ready() -> void:
 	add_child(out)
 
 	# 联机逻辑和界面
-	client = CLIENT.new()
-	client.main = self
-	add_child(client)
+	if _demo_view.is_empty():
+		client = CLIENT.new()
+		client.main = self
+		add_child(client)
 	var ui_layer := CanvasLayer.new()
 	ui_layer.layer = 60
 	ui = UI.new()
 	ui.cl = client
+	ui.demo_only = not _demo_view.is_empty()
 	ui_layer.add_child(ui)
 	add_child(ui_layer)
 
@@ -164,6 +193,8 @@ func _ready() -> void:
 
 	get_tree().root.size_changed.connect(_layout)
 	_apply()
+	if not _demo_view.is_empty() and _demo_view.info.dark > 0.0:
+		well.set_dark_now(_demo_view.info.dark)
 
 	if args.has("lights"):
 		well.set_light_count(int(args["lights"]))
@@ -174,6 +205,21 @@ func _ready() -> void:
 			# 截图时关掉垂直同步：窗口被别的窗口挡住时，macOS 会把带垂直同步的窗口降到每秒一两帧，截图要等很久
 			DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED)
 		_shot(String(args["shot"]))
+
+
+func _prepare_demo() -> void:
+	var tier := clampi(int(args.get("tier", "1")), 0, 3)
+	var dark: bool = args.get("dark", "0") == "1"
+	var items := []
+	for kind in DEMO_LAYOUT:
+		var pos: Vector2 = DEMO_LAYOUT[kind] / Cfg.S
+		items.append({"id": items.size() + 1, "t": Cfg.type_index(kind), "x": pos.x, "y": pos.y})
+	var player := {"id": 1, "c": 0, "x": Cfg.GW * 0.5 / Cfg.S, "ang": 0.0, "len": 104.0, "st": 0, "fz": 0, "sg": 0}
+	_demo_view = {
+		"players": [player], "fields": [items], "split": false,
+		"info": {"tier": tier, "live": true, "paused": false, "dark": float(dark)},
+		"hud": {"plate": "演示局 · " + String(Cfg.b().LAYERS[tier]), "plank": "", "clock": "黑灯" if dark else ""},
+	}
 
 
 func _make_vp() -> SubViewport:
@@ -198,9 +244,19 @@ func _make_pass(shader: Shader) -> Array:
 	return [vp, m]
 
 
+func _gi_strength(key: String, fallback: float) -> float:
+	var value := String(args.get(key, str(fallback)))
+	return clampf(float(value), 0.0, 2.0) if value.is_valid_float() else fallback
+
+
+func _update_gi() -> void:
+	_gi_active = quality == Cfg.Q.ULTRA and _gi_requested and fx_on and not _split
+	well.set_gi(_gi_active, _gi_divisor, _gi_bounce, _gi_shadow, _gi_dark_glow)
+
+
 # 按当前画质和光影开关，把各层的参数设好
 func _apply() -> void:
-	var hi := quality == Cfg.Q.HIGH
+	var hi := quality >= Cfg.Q.HIGH
 	var low := quality == Cfg.Q.LOW
 	well.apply(quality, fx_on)
 	for p in panes:
@@ -213,6 +269,8 @@ func _apply() -> void:
 		up_vps[i].render_target_update_mode = SubViewport.UPDATE_ALWAYS if (bloom_on and i < levels - 1) else SubViewport.UPDATE_DISABLED
 	_bloom = -1.0
 	_layout()
+	_update_gi()
+	label.position.y = 4.0 if quality == Cfg.Q.ULTRA and _demo_view.is_empty() else 348.0
 
 
 # 窗口大小变了（或画质变了）时重新排版
@@ -225,7 +283,7 @@ func _layout() -> void:
 	k = floorf(fit) if (fit >= 1.0 and fit - floorf(fit) < 0.04) else fit
 	# 窗口比例不是 16:9 时：左右居中、顶边对齐，多出来的地方露出更多底图（不放矿石）
 	off = Vector2(floorf((ws.x - Cfg.GW * k) / 2.0), 0.0)
-	var hi := quality == Cfg.Q.HIGH
+	var hi := quality >= Cfg.Q.HIGH
 
 	world_vp.size = ws
 	well.scale = Vector2(k, k)
@@ -316,7 +374,7 @@ func _unhandled_key_input(e: InputEvent) -> void:
 				quality = maxi(Cfg.Q.LOW, quality - 1)
 				_apply()
 			KEY_BRACKETRIGHT:
-				quality = mini(Cfg.Q.HIGH, quality + 1)
+				quality = mini(Cfg.Q.ULTRA, quality + 1)
 				_apply()
 			KEY_BACKSLASH:
 				fx_on = not fx_on
@@ -333,7 +391,11 @@ func _process(dt: float) -> void:
 	# 这一帧每口井画什么，字交给界面层画
 	# 顿帧：自己刚钩中东西的那几十毫秒，画面停在上一帧不动
 	var view: Dictionary = _last_view
-	if _last_view.is_empty() or float(Time.get_ticks_msec()) >= client.hitstop_until:
+	if not _demo_view.is_empty():
+		_demo_time = fmod(_demo_time + dt, TAU / 1.4)
+		_demo_view.players[0].ang = 0.99 * sin(_demo_time * 1.4)
+		view = _demo_view
+	elif _last_view.is_empty() or float(Time.get_ticks_msec()) >= client.hitstop_until:
 		view = client.build_view()
 		_last_view = view
 	var players: Array = view.players
@@ -342,6 +404,7 @@ func _process(dt: float) -> void:
 		_split = view.split
 		split_root.visible = _split
 		well.visible = not _split
+		_update_gi()
 		for p in panes:
 			p.vp.render_target_update_mode = SubViewport.UPDATE_DISABLED
 			p.rect.visible = false
@@ -378,7 +441,7 @@ func _process(dt: float) -> void:
 		h.origin = Vector2.ZERO
 		h.scale = 1.0
 		h.veil = ""
-		h.players = players if view.info.live else []
+		h.players = players if view.info.live and _demo_view.is_empty() else []
 		huds.append(h)
 	ui.draw_hud(huds, _split)
 	# 有面板开着时，把后面的游戏画面虚化、压暗（渐入渐出）
@@ -411,7 +474,7 @@ func _process(dt: float) -> void:
 	if is_web and _stat_t >= (0.2 if args.has("test") else 1.0):
 		_stat_t = 0.0
 		JavaScriptBridge.eval("window.dmStats=%s" % JSON.stringify(_stats()), true)
-		if args.has("test"):
+		if args.has("test") and _demo_view.is_empty():
 			_test_hooks()
 	if _bench_left > 0.0:
 		if _bench_wait > 0.0:
@@ -427,6 +490,8 @@ func _stats() -> Dictionary:
 	var ws: Vector2i = get_tree().root.size
 	return {
 		"q": Cfg.Q_NAMES[quality], "fx": fx_on, "fps": snappedf(_fps, 0.1), "w": ws.x, "h": ws.y, "k": snappedf(k, 0.001),
+		"gi": int(_gi_active), "gir": _gi_divisor if quality == Cfg.Q.ULTRA else 0,
+		"gid": int(_gi_active and _gi_dark_glow), "demo": int(not _demo_view.is_empty()),
 		"lights": well.light_count(), "ready_ms": roundi(_ready_ms), "gpu": RenderingServer.get_video_adapter_name(), "frames": _frames,
 	}
 
@@ -509,6 +574,12 @@ func _shot(shot_name: String) -> void:
 		var b64 := Marshalls.raw_to_base64(img.save_png_to_buffer())
 		JavaScriptBridge.eval("fetch('/__shot?name=%s',{method:'POST',body:Uint8Array.from(atob('%s'),c=>c.charCodeAt(0))}).then(()=>{window.dmShotDone='%s'})" % [shot_name, b64, shot_name], true)
 	else:
-		img.save_png(ProjectSettings.globalize_path("res://shots").path_join(shot_name + ".png"))
-		print("SHOT " + shot_name)
-		get_tree().quit()
+		var shot_dir := ProjectSettings.globalize_path("res://shots")
+		var err := DirAccess.make_dir_recursive_absolute(shot_dir)
+		if err == OK:
+			err = img.save_png(shot_dir.path_join(shot_name + ".png"))
+		if err == OK:
+			print("SHOT " + shot_name)
+		else:
+			push_error("截图保存失败：" + error_string(err))
+		get_tree().quit(int(err != OK))

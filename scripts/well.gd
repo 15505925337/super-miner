@@ -7,6 +7,7 @@ extends Node2D
 const Cfg = preload("res://scripts/cfg.gd")
 const ITEM := preload("res://scenes/item.tscn")
 const HOOK := preload("res://scenes/hook.tscn")
+const GI := preload("res://scripts/gi.gd")
 const LIGHT_TEX := preload("res://res/light_radial.tres")
 const HALO := preload("res://res/halo.tres")
 const SOFT_SHADOW := preload("res://res/soft_shadow.tres")
@@ -19,6 +20,7 @@ const BG_SHADER := preload("res://shaders/bg.gdshader")
 const LAVA_CRACKS := preload("res://art/relief_3_e.png")
 const LAVA_CRACK_STRENGTH := 0.60
 const DARK_AMBIENT := Color(0.06, 0.06, 0.09)
+const CAVE_TOP := 80.0
 const MINER_SIZE := 64.0
 const DARK_MINER_BRIGHTNESS := 0.40
 const MINER_SOURCE_SIZE := 512.0
@@ -81,6 +83,7 @@ var bloom := 0.06                # 当前层要的泛光强度，主场景来读
 var _k := 1.0
 var _items := {}                 # 物件 id → 节点
 var _miners := {}                # 玩家 id → { root, sprite, shadow, hook, frames, ice }
+var _gi: GI
 var _extra: Array[PointLight2D] = []
 var _t := 0.0
 var _tier := -1
@@ -172,6 +175,8 @@ func _set_tier(tier: int) -> void:
 		lights_root.add_child(node)
 	for n in _items.values():
 		_set_item_lighting(n)
+	if _gi != null:
+		_gi.set_tier(t, tier == 3, CAVE_TOP if tier == 0 else 0.0)
 	apply(quality, fx_on)
 
 
@@ -234,6 +239,7 @@ func set_view(items: Array, players: Array, info: Dictionary) -> void:
 		var hauling := st == 2 or st == 4
 		var frame := String(p.get("frame", "idle"))
 		m.sprite.texture = m.frames[frame]
+		m.frame = frame
 		# 动作帧已画好身体起伏，整张图保持固定，让木台贴着台沿。
 		m.root.position = Vector2(x, ledge - MINER_LEDGE_OFFSET)
 		m.ice.visible = int(p.fz) == 1
@@ -292,12 +298,12 @@ func miner_pos(id: int) -> Vector2:
 # 井壁、远景与支架在窗口露出的范围内按同一坐标镜像。剪影贴着实际画面四边，避免在中央竖起两道剪影。
 func set_draw_area(area: Rect2) -> void:
 	var visible_area := area.merge(Rect2(0, 0, Cfg.GW, Cfg.GH)).grow(4.0)
-	var cave := Rect2(visible_area.position.x, 80.0, visible_area.size.x, visible_area.end.y - 80.0)
+	var cave := Rect2(visible_area.position.x, CAVE_TOP, visible_area.size.x, visible_area.end.y - CAVE_TOP)
 	bg.position = cave.position
 	bg.region_rect = Rect2(cave.position * 3.0, cave.size * 3.0)
 	emis.position = cave.position
 	emis.region_rect = Rect2(cave.position * 1.5, cave.size * 1.5)
-	var passage := Rect2(visible_area.position.x, 0.0, visible_area.size.x, 80.0)
+	var passage := Rect2(visible_area.position.x, 0.0, visible_area.size.x, CAVE_TOP)
 	far.position = passage.position
 	far.region_rect = Rect2(passage.position * 3.0, passage.size * 3.0)
 	frame_layer.position = far.position
@@ -351,6 +357,8 @@ func _set_miner_dark(m: Dictionary, dark: float) -> void:
 func _apply_dark() -> void:
 	var d := _dark
 	_dark_done = d
+	if _gi != null:
+		_gi.set_dark(d)
 	ambient.color = Color.WHITE.lerp(DARK_AMBIENT, d)
 	lights_root.modulate.a = 1.0 - d
 	embers.modulate.a = 1.0 - d
@@ -358,6 +366,24 @@ func _apply_dark() -> void:
 		_set_item_look(n)
 	for m in _miners.values():
 		_set_miner_dark(m, d)
+
+
+# 演示局从首帧进入指定明暗。
+func set_dark_now(dark: float) -> void:
+	_dark = dark
+	_dark_want = dark
+	_apply_dark()
+
+
+func set_gi(on: bool, divisor: int, bounce: float, shadow: float, keep_dark_glow: bool) -> void:
+	if _gi == null:
+		if not on:
+			return
+		_gi = GI.new(_items, _miners, divisor, bounce, shadow, keep_dark_glow)
+		add_child(_gi)
+		_gi.set_tier(TIERS[_tier], _tier == 3, CAVE_TOP if _tier == 0 else 0.0)
+		_gi.set_dark(_dark_done)
+	_gi.set_active(on)
 
 
 # 单次播放。用同一组图中可见范围最大的一帧对齐目标尺寸。

@@ -106,6 +106,7 @@ var emo_box: VBoxContainer
 var help: Control
 var mute_btn: Button
 var _last_ph := ""
+var demo_only := false
 
 
 # 标题下面的分隔线：两头淡出的细金线，中间一个小菱形
@@ -140,6 +141,10 @@ func _ready() -> void:
 	hud_text.size = size
 	hud_text.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(hud_text)
+	if demo_only:
+		set_process(false)
+		set_process_input(false)
+		return
 	_build_home()
 	_build_lobby()
 	_build_hud()
@@ -180,7 +185,7 @@ func _ready() -> void:
 
 # 有面板开着（主场景据此把后面的游戏画面虚化、压暗）
 func menu_open() -> bool:
-	return home.visible or lobby.visible or rend.visible or shop.visible or over.visible or solo_over.visible or help.visible
+	return not demo_only and (home.visible or lobby.visible or rend.visible or shop.visible or over.visible or solo_over.visible or help.visible)
 
 
 # ───── 样式 ─────
@@ -491,6 +496,8 @@ func _screen_bg(texture: Texture2D) -> Sprite2D:
 
 func set_draw_area(area: Rect2) -> void:
 	_draw_area = area
+	if demo_only:
+		return
 	pause_shade.position = area.position
 	pause_shade.size = area.size
 	for bg in [home_bg, shop_bg]:
@@ -730,8 +737,9 @@ func draw_hud(huds: Array, split: bool) -> void:
 	for h in huds:
 		var o: Vector2 = h.origin
 		var sc: float = h.scale
+		var players: Array = [] if demo_only else h.players
 		if sc < 0.4:                              # 对手的小窗太小，只留一行名字和钱
-			for p in h.players:
+			for p in players:
 				_hud_text(o + Vector2(3, 1), Vector2(118, 10), "%s %s" % [p.name, Cfg.money(p.m)], 8, cl.pcolor(int(p.id)), HORIZONTAL_ALIGNMENT_LEFT)
 		else:
 			var fs := maxi(8, roundi(12 * sc))
@@ -743,9 +751,9 @@ func draw_hud(huds: Array, split: bool) -> void:
 				_band(band.position, band.size)
 			_hud_text(o + Vector2(8, 3) * sc, Vector2(220, 16) * sc, String(h.plate), fs, CREAM, HORIZONTAL_ALIGNMENT_LEFT)
 			_hud_text(o + Vector2(170, 3) * sc, Vector2(300, 16) * sc, String(h.plank), fs, GOLD, HORIZONTAL_ALIGNMENT_CENTER)
-			var clock_x := 483 if cl.mode() == "solo" else 540
+			var clock_x := 483 if not demo_only and cl.mode() == "solo" else 540
 			_hud_text(o + Vector2(clock_x, 3) * sc, Vector2(92, 16) * sc, String(h.clock), fs, CREAM, HORIZONTAL_ALIGNMENT_RIGHT)
-			for p in h.players:
+			for p in players:
 				var x: float = float(p.x) * Cfg.S
 				_hud_text(o + Vector2(x - 75, 31) * sc, Vector2(150, 14) * sc, String(p.name) + "  " + String(p.tag), fs, cl.pcolor(int(p.id)), HORIZONTAL_ALIGNMENT_CENTER)
 				if String(p.hint) != "":
@@ -1040,7 +1048,7 @@ func _confirm_solo_leave(confirm: bool) -> void:
 
 
 func _input(e: InputEvent) -> void:
-	if cl.mode() != "solo" or not (e is InputEventKey and e.pressed and not e.echo):
+	if demo_only or not (e is InputEventKey and e.pressed and not e.echo) or cl.mode() != "solo":
 		return
 	var key: int = e.physical_keycode if e.physical_keycode != 0 else e.keycode
 	if key == KEY_ESCAPE and cl.solo_can_pause():

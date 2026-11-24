@@ -25,6 +25,9 @@ func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	is_web = OS.has_feature("web")
 	var args := Cfg.args()
+	if args.get("demo", "0") == "1":
+		set_process(false)
+		return
 	if is_web:
 		url = str(JavaScriptBridge.eval("(location.protocol==='https:'?'wss://':'ws://')+location.host", true))
 		var r = JavaScriptBridge.eval("(function(){try{var t=sessionStorage.getItem('dj_token'),old=!!t;if(!t){t=Math.random().toString(36).slice(2)+Date.now().toString(36);sessionStorage.setItem('dj_token',t);}return (old?'1':'0')+t;}catch(e){return ''}})()", true)
