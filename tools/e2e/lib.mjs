@@ -1,6 +1,5 @@
 // 联调脚本的公共部分。用 ego 浏览器开两个页面，像真人一样点按钮、按键、用输入法打字。
 // 这些函数会被拼到各个联调脚本前面，再交给 `ego-browser nodejs` 执行（见 tools/e2e/run.sh）。
-const SHOTS = "/Users/luo/claude/deep-mine-godot/shots/";
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 

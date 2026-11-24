@@ -4,4 +4,4 @@
 # 会在 ego 里用一个名叫"深井夺金联调"的任务空间，里面开两个标签页，跑完留着下次接着用。
 cd "$(dirname "$0")"
 # 默认连 8060 的服务端；要连临时的短局服务端：BASE=http://localhost:8062/ tools/e2e/run.sh fun_vs
-(echo 'const SPACE = "深井夺金联调";'; echo "const BASE = \"${BASE:-http://localhost:8060/}\";"; cat lib.mjs "$1.mjs") | ego-browser nodejs
+(echo "const SHOTS = \"$(cd ../.. && pwd)/shots/\";"; echo 'const SPACE = "深井夺金联调";'; echo "const BASE = \"${BASE:-http://localhost:8060/}\";"; cat lib.mjs "$1.mjs") | ego-browser nodejs

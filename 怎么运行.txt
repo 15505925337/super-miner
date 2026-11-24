@@ -1,0 +1,11 @@
+﻿超级矿工 · 怎么运行
+1. 到 nodejs.org 安装 Node.js 24 或更新版本，选择 24 或更新的 LTS 版本即可。
+2. 完整解压后，macOS 双击 start.command，Windows 双击 start.bat，Linux 在解压目录运行 ./start.sh。
+3. 浏览器会自动打开 http://localhost:8060，没打开就手动输入这个地址。
+4. 关掉启动窗口或按 Ctrl+C 可停止游戏服务。
+5. macOS 如果提示无法验证开发者，在 Finder 中右键点击 start.command，选「打开」。
+6. 同一 WiFi 联机时，从解压目录按下面的命令启动。
+   macOS 运行 HOST=0.0.0.0 ./start.command，Linux 运行 HOST=0.0.0.0 ./start.sh。
+   在 Windows 命令提示符先执行 set HOST=0.0.0.0，再执行 start.bat。
+7. 把房间里「同一 WiFi」一栏的地址发给朋友。同一网络里的人都能连到这台电脑的这个端口。
+8. 电脑默认超高，手机和平板默认高。网址可加 ?q=ultra、?q=high、?q=mid 或 ?q=low 指定画质。
