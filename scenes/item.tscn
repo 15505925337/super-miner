@@ -1,10 +1,11 @@
-[gd_scene load_steps=10 format=3]
+[gd_scene load_steps=11 format=3]
 
 [ext_resource type="Script" path="res://scripts/item.gd" id="1"]
 [ext_resource type="Texture2D" path="res://res/soft_shadow.tres" id="2"]
 [ext_resource type="Material" path="res://res/mat_add.tres" id="3"]
 [ext_resource type="Texture2D" path="res://res/halo.tres" id="5"]
 [ext_resource type="Shader" path="res://shaders/item_spark.gdshader" id="6"]
+[ext_resource type="Shader" path="res://shaders/gold_sweep.gdshader" id="7"]
 
 [sub_resource type="Gradient" id="halo_gradient"]
 offsets = PackedFloat32Array(0, 0.45, 0.7, 1)
@@ -20,6 +21,9 @@ fill_to = Vector2(1, 0.5)
 
 [sub_resource type="ShaderMaterial" id="spark_material"]
 shader = ExtResource("6")
+
+[sub_resource type="ShaderMaterial" id="glow_material"]
+shader = ExtResource("7")
 
 [node name="Item" type="Node2D"]
 script = ExtResource("1")
@@ -37,10 +41,11 @@ texture_filter = 2
 texture = SubResource("halo_texture")
 
 [node name="Sprite" type="Sprite2D" parent="."]
+texture_filter = 4
 
 [node name="Glow" type="Sprite2D" parent="."]
 visible = false
-material = ExtResource("3")
+material = SubResource("glow_material")
 texture_filter = 4
 
 [node name="Spark" type="Sprite2D" parent="."]

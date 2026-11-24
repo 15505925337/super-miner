@@ -55,6 +55,7 @@ func _ready() -> void:
 	glow.texture = sprite.texture
 	_rim_mat = ShaderMaterial.new()
 	_rim_mat.shader = RIM_SHADER
+	sprite.material = _rim_mat  # 各画质共用采样，按光影开关计算受光边。
 	# 照原型的画法：整张图画成边长 = 碰撞半径 × 2.5 的正方形
 	_radius = float(Cfg.b().TYPES[Cfg.type_index(kind)].r) * Cfg.S
 	var d := _radius * 2.5
@@ -215,6 +216,5 @@ func set_look(detail: bool, dark: float, glow_strength: float, rim_strength: flo
 	if not detail:
 		spark.hide()
 	_update_glow()
-	sprite.material = _rim_mat if detail and dark < 1.0 else null
 	_rim_mat.set_shader_parameter("rim_strength", rim_strength)
-	_rim_mat.set_shader_parameter("light_fade", 1.0 - dark)
+	_rim_mat.set_shader_parameter("light_fade", 1.0 - dark if detail else 0.0)

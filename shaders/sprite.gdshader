@@ -1,6 +1,8 @@
 // 只在物件原图的轮廓内提亮，主光与岩浆反光各自保护深色描边。
 shader_type canvas_item;
 
+#include "res://shaders/sharp_sampling.gdshaderinc"
+
 uniform vec4 light_col : source_color = vec4(1.0);
 uniform vec4 under_col : source_color = vec4(0.0);
 uniform vec2 light_axis = vec2(0.0, 1.0);
@@ -29,9 +31,11 @@ float in_texture(vec2 uv) {
 }
 
 void fragment() {
-	vec4 base = texture(TEXTURE, UV);
+	vec2 dx = dFdx(UV);
+	vec2 dy = dFdy(UV);
+	vec4 base = textureGrad(TEXTURE, sharp_uv(UV, TEXTURE_PIXEL_SIZE, dx, dy), dx, dy);
 	float luma = dot(base.rgb, vec3(0.2126, 0.7152, 0.0722));
-	if (base.a >= 0.95 && (luma > 0.36 || under_col.a > 0.0)) {
+	if (light_fade > 0.0 && base.a >= 0.95 && (luma > 0.36 || under_col.a > 0.0)) {
 		vec2 radius = rim_px * TEXTURE_PIXEL_SIZE;
 		float outside = 0.0;
 		vec2 inward = vec2(0.0);

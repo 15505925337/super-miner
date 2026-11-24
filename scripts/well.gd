@@ -14,6 +14,7 @@ const MAT_ADD := preload("res://res/mat_add.tres")
 const MAT_UNSHADED := preload("res://res/mat_unshaded.tres")
 const ICE := preload("res://art/ice.png")
 const CHEST_OPEN := preload("res://art/chest_open.png")
+const CHEST_OPEN_MAT := preload("res://res/chest_open.tres")
 const SHAFT := preload("res://shaders/shaft.gdshader")
 const BG_SHADER := preload("res://shaders/bg.gdshader")
 const LAVA_CRACKS := preload("res://art/relief_3_e.png")
@@ -397,12 +398,13 @@ func fx_chest(id: int) -> void:
 	var m: Dictionary = _miners.get(id, {})
 	if m.is_empty():
 		return
-	var pos: Vector2 = m.root.position + m.head.position + Vector2(14, -14)
+	# 头灯已画入贴图，弹图锚在矿工贴图中心上方。
+	var pos: Vector2 = m.root.position + Vector2(0, -19)
 	pos.y = maxf(13.0, pos.y)
 	var s := Sprite2D.new()
 	s.texture = CHEST_OPEN
-	s.material = MAT_UNSHADED
-	s.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+	s.material = CHEST_OPEN_MAT
+	s.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
 	s.position = pos + Vector2(0, 7)
 	var full_scale := Vector2.ONE * 24.0 / float(CHEST_OPEN.get_width())
 	s.scale = full_scale * 0.4
