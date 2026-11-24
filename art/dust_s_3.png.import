@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://be4b53cuvi8py"
-path="res://.godot/imported/dust_3.png-b2c569dad2f2698dce536345e3f12cca.ctex"
+uid="uid://we5tanx17slm"
+path="res://.godot/imported/dust_s_3.png-bc2b233874bec21f805a18adae289f53.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://art/dust_3.png"
-dest_files=["res://.godot/imported/dust_3.png-b2c569dad2f2698dce536345e3f12cca.ctex"]
+source_file="res://art/dust_s_3.png"
+dest_files=["res://.godot/imported/dust_s_3.png-bc2b233874bec21f805a18adae289f53.ctex"]
 
 [params]
 

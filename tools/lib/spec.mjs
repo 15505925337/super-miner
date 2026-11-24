@@ -1,6 +1,6 @@
 // 每张素材怎么处理。文件名（不含扩展名）就是键；素材清单.md 里的文件名以这里为准。
-// 井下物件和钩爪以矿工的像素大小为准：1920×1080 全屏下一格约 2 个屏幕像素。
-// 素材按原样或缩小后进游戏，不压色板。物件和钩爪在色块交界处抗锯齿，背景是手绘高清图。
+// 井下物件、钩爪和特效以矿工的像素大小为准：1920×1080 全屏下一格约 2 个屏幕像素。
+// 素材按原样或缩小后进游戏，不压色板。物件、钩爪和特效在色块交界处抗锯齿，背景是手绘高清图。
 //   kind: hd   会受灯光影响的物件：缩小 shrink 倍，配法线贴图
 //         img  不受灯光影响的图：头像、图标、标题，只缩小
 //         bg   整屏背景：原样用，有损压缩省包体
@@ -13,7 +13,8 @@ const item = { kind: 'hd', shrink: 1, normal: pixelNormal, draw: '边长 = 碰�
 const miner = { kind: 'hd', shrink: 2, normal: { ...N, bulge: 0.6 }, draw: '128×128，木台底边落在台沿上' };
 const claw = { ...item, draw: '60×60（含透明边），判定点在爪口中央，绳子接到绳环' };
 const keeper = { kind: 'img', shrink: 1, draw: '商店里的半身像' };
-const fx = { kind: 'img', shrink: 2, draw: '无光照的反馈图' };
+// 任务 13 的 31 张特效图按原生尺寸入库。一格画成 2/3 个设计像素，无场景光照。
+const fx = { kind: 'img', shrink: 1, draw: '无光照的反馈图，1080p 全屏下一格两个屏幕像素' };
 const icon = { kind: 'img', shrink: 2, draw: '道具栏和商店里的小图标' };
 const bg = { kind: 'bg', lossy: 0.9, draw: '1280×720 铺满，地面线在距顶 160 处' };
 
@@ -48,7 +49,10 @@ for (const n of [1, 2, 3, 4]) {
 for (const face of ['think', 'surprised', 'sigh', 'smug', 'refuse', 'bye', 'neutral_blink', 'neutral_talk']) {
   SPEC[`keeper_${face}`] = keeper;
 }
-for (const [name, count] of Object.entries({ boom: 6, spark: 4, dust: 4 })) {
-  for (let i = 1; i <= count; i++) SPEC[`${name}_${i}`] = fx;
+for (let i = 1; i <= 6; i++) SPEC[`boom_${i}`] = fx;
+for (const kind of ['spark', 'dust']) {
+  for (const size of ['s', 'm', 'l']) {
+    for (let i = 1; i <= 4; i++) SPEC[`${kind}_${size}_${i}`] = fx;
+  }
 }
 SPEC.ice = fx;

@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://btbexvx585rmt"
-path="res://.godot/imported/spark_2.png-22d091c68129c036b0672d630dffe4ed.ctex"
+uid="uid://03qpsgn0h220"
+path="res://.godot/imported/spark_s_2.png-9ecd01a238359437d7b33c2f9b5d4002.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://art/spark_2.png"
-dest_files=["res://.godot/imported/spark_2.png-22d091c68129c036b0672d630dffe4ed.ctex"]
+source_file="res://art/spark_s_2.png"
+dest_files=["res://.godot/imported/spark_s_2.png-9ecd01a238359437d7b33c2f9b5d4002.ctex"]
 
 [params]
 

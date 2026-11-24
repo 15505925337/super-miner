@@ -582,13 +582,23 @@ func _test_hooks() -> void:
 			"frameDump":
 				if local_enabled:
 					_start_frame_dump(cmd)
-			"showChest":
+			"showFx":
+				if not local_enabled or client == null or client.ph() != "play":
+					continue
+				var fw := well_for_field(int(cmd.get("f", 0)))
+				if fw != null:
+					var pos := Vector2(float(cmd.get("x", Cfg.GW * 0.5)), float(cmd.get("y", Cfg.GH * 0.5)))
+					fw.preview_fx(String(cmd.get("k", "")), String(cmd.get("s", "")), pos)
+			"showChest", "showIce":
 				if not local_enabled or client == null or client.ph() != "play":
 					continue
 				var id := int(cmd.get("i", -1))
 				var w := well_for_player(id)
 				if w != null:
-					w.fx_chest(id)
+					if cmd.get("t") == "showChest":
+						w.fx_chest(id)
+					else:
+						w.preview_ice(id)
 			_:
 				if client != null:
 					Net.send(cmd)
