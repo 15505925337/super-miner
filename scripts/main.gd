@@ -111,6 +111,12 @@ func _ready() -> void:
 		split_root.add_child(r)
 		p.rect = r
 	mid.add_child(split_root)
+	# 小窗里的开箱弹图直接画到最终玩法画布，按小窗比例采样一次。
+	var chest_layer := Node2D.new()
+	mid.add_child(chest_layer)
+	well.chest_layer = chest_layer
+	for p in panes:
+		p.well.chest_layer = chest_layer
 	world_vp.add_child(mid)
 	add_child(world_vp)
 
@@ -339,10 +345,12 @@ func _process(dt: float) -> void:
 	var players: Array = view.players
 	var huds := []
 	if view.split != _split:
+		well.clear_chest_popups()
 		_split = view.split
 		split_root.visible = _split
 		well.visible = not _split
 		for p in panes:
+			p.well.clear_chest_popups()
 			p.vp.render_target_update_mode = SubViewport.UPDATE_DISABLED
 			p.rect.visible = false
 	if _split:
@@ -355,6 +363,7 @@ func _process(dt: float) -> void:
 			p.vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS if on else SubViewport.UPDATE_DISABLED
 			p.rect.visible = on
 			if not on:
+				p.well.clear_chest_popups()
 				continue
 			var pl: Dictionary = players[i]
 			_pane_of_player[int(pl.id)] = i
@@ -370,6 +379,9 @@ func _process(dt: float) -> void:
 			h.veil = "淘汰" if int(pl.out) == 1 else ""
 			h.note = String(view.hud.note) if client.seat_of(int(pl.id)) == 0 else ""
 			h.players = [pl]
+			if p.well.has_chest_popups():
+				h.chest_well = p.well
+				h.to_screen = Transform2D(0.0, p.rect.size / Vector2(p.vp.size), 0.0, p.rect.position)
 			huds.append(h)
 	else:
 		well.process_mode = Node.PROCESS_MODE_DISABLED if view.info.paused else Node.PROCESS_MODE_INHERIT
@@ -379,8 +391,18 @@ func _process(dt: float) -> void:
 		h.scale = 1.0
 		h.veil = ""
 		h.players = players if view.info.live else []
+		if well.has_chest_popups():
+			h.chest_well = well
+			h.to_screen = Transform2D.IDENTITY
 		huds.append(h)
 	ui.draw_hud(huds, _split)
+	for h in huds:
+		if h.has("chest_well"):
+			var name_bounds: Array[Rect2] = []
+			for box in h.name_bounds:
+				name_bounds.append(Rect2(off + box.position * k, box.size * k))
+			# 井的位置在本帧震动后确定，绘制前再对齐台沿。
+			h.chest_well.layout_chest_popups.call_deferred(h.to_screen, name_bounds)
 	# 有面板开着时，把后面的游戏画面虚化、压暗（渐入渐出）
 	_menu = move_toward(_menu, 1.0 if ui.menu_open() else 0.0, dt * 4.0)
 	final_mat.set_shader_parameter("menu", _menu if fx_on else 0.0)
@@ -452,8 +474,16 @@ func _test_hooks() -> void:
 	var q = JavaScriptBridge.eval("(function(){window.dmState=%s;var q=window.dmQ||[];window.dmQ=[];return JSON.stringify(q)})()" % JSON.stringify(o), true)
 	if q is String and q.length() > 2:
 		for cmd in JSON.parse_string(q):
-			if cmd is Dictionary:
+			if not cmd is Dictionary:
+				continue
+			if cmd.get("t") != "showChest":
 				Net.send(cmd)
+				continue
+			if String(args.get("test", "")) == "1" and client.ph() == "play":
+				var id := int(cmd.get("i", -1))
+				var w := well_for_player(id)
+				if w != null:
+					w.fx_chest(id)
 
 
 # 每口井里各种东西有几个（联调脚本用它确认"井里多了石头""掉了金块"）

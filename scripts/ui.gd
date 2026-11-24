@@ -730,9 +730,10 @@ func draw_hud(huds: Array, split: bool) -> void:
 	for h in huds:
 		var o: Vector2 = h.origin
 		var sc: float = h.scale
+		var names: Array[Label] = []
 		if sc < 0.4:                              # 对手的小窗太小，只留一行名字和钱
 			for p in h.players:
-				_hud_text(o + Vector2(3, 1), Vector2(118, 10), "%s %s" % [p.name, Cfg.money(p.m)], 8, cl.pcolor(int(p.id)), HORIZONTAL_ALIGNMENT_LEFT)
+				names.append(_hud_text(o + Vector2(3, 1), Vector2(118, 10), "%s %s" % [p.name, Cfg.money(p.m)], 8, cl.pcolor(int(p.id)), HORIZONTAL_ALIGNMENT_LEFT))
 		else:
 			var fs := maxi(8, roundi(12 * sc))
 			if String(h.plate) != "" or String(h.plank) != "":   # 顶上一条往下淡出的暗带，字压在上面才清楚
@@ -747,9 +748,19 @@ func draw_hud(huds: Array, split: bool) -> void:
 			_hud_text(o + Vector2(clock_x, 3) * sc, Vector2(92, 16) * sc, String(h.clock), fs, CREAM, HORIZONTAL_ALIGNMENT_RIGHT)
 			for p in h.players:
 				var x: float = float(p.x) * Cfg.S
-				_hud_text(o + Vector2(x - 75, 31) * sc, Vector2(150, 14) * sc, String(p.name) + "  " + String(p.tag), fs, cl.pcolor(int(p.id)), HORIZONTAL_ALIGNMENT_CENTER)
+				names.append(_hud_text(o + Vector2(x - 75, 31) * sc, Vector2(150, 14) * sc, String(p.name) + "  " + String(p.tag), fs, cl.pcolor(int(p.id)), HORIZONTAL_ALIGNMENT_CENTER))
 				if String(p.hint) != "":
-					_hud_text(o + Vector2(x - 90, 15) * sc, Vector2(180, 14) * sc, String(p.hint), fs, CREAM, HORIZONTAL_ALIGNMENT_CENTER)
+					names.append(_hud_text(o + Vector2(x - 90, 15) * sc, Vector2(180, 14) * sc, String(p.hint), fs, CREAM, HORIZONTAL_ALIGNMENT_CENTER))
+		if h.has("chest_well"):
+			var bounds: Array[Rect2] = []
+			for label in names:
+				# 用标签实际文字的最小尺寸和描边，避免把整块对齐用的留白算成障碍。
+				var text_size := label.get_minimum_size()
+				var at := label.position
+				if label.horizontal_alignment == HORIZONTAL_ALIGNMENT_CENTER:
+					at.x += (label.size.x - text_size.x) * 0.5
+				bounds.append(Rect2(at, text_size).grow(label.get_theme_constant("outline_size")))
+			h.name_bounds = bounds
 		if String(h.veil) != "":                  # 淘汰了：盖一层深色，写上"淘汰"
 			if _veil_n >= _veils.size():
 				var r := ColorRect.new()
@@ -794,9 +805,9 @@ func _band(pos: Vector2, box: Vector2) -> void:
 	b.size = box
 
 
-func _hud_text(pos: Vector2, box: Vector2, text: String, fs: int, color: Color, align: int) -> void:
+func _hud_text(pos: Vector2, box: Vector2, text: String, fs: int, color: Color, align: int) -> Label:
 	if text == "":
-		return
+		return null
 	if _hud_n >= _hud_pool.size():
 		var n := Label.new()
 		n.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -816,6 +827,7 @@ func _hud_text(pos: Vector2, box: Vector2, text: String, fs: int, color: Color, 
 		l.add_theme_font_size_override("font_size", fs)
 		l.add_theme_constant_override("outline_size", maxi(2, fs / 3))
 	l.add_theme_color_override("font_color", color)
+	return l
 
 
 func _fill_hud() -> void:
