@@ -3,33 +3,35 @@ extends Node2D
 
 const Cfg := preload("res://scripts/cfg.gd")
 const SH_MASK := preload("res://shaders/gi_mask.gdshader")
+const SH_JFA := preload("res://shaders/gi_jfa.gdshader")
+const SH_DISTANCE := preload("res://shaders/gi_distance.gdshader")
 const SH_LIGHT := preload("res://shaders/gi_light.gdshader")
 const SH_RESOLVE := preload("res://shaders/gi_resolve.gdshader")
 const SH_BACKGROUND := preload("res://shaders/gi_background.gdshader")
 const SH_RECEIVE := preload("res://shaders/gi_receive.gdshader")
 const DEFAULT_DIVISOR := 2
-const DEFAULT_BOUNCE := 0.70
-const DEFAULT_SHADOW := 0.85
+const DEFAULT_BOUNCE := 1.35
+const DEFAULT_SHADOW := 1.45
+const JFA_JUMPS := [512, 256, 128, 64, 32, 16, 8, 4, 2, 1, 1]
 const DESIGN_SIZE := Vector2i(Cfg.GW, Cfg.GH)
 const DESIGN_PX := Vector2.ONE / Vector2(DESIGN_SIZE)
 
-# 颜色和中心强度（RGBA）、作用半径（设计像素）。
+# 颜色和中心强度（RGBA）、衰减尺度、光照覆盖半径（设计像素）。
 const ITEM_EMISSION := {
-	"gs": [Color(1.0, 0.65, 0.20, 0.26), 24.0],
-	"gm": [Color(1.0, 0.65, 0.20, 0.30), 30.0],
-	"gl": [Color(1.0, 0.65, 0.20, 0.34), 38.0],
-	"gx": [Color(1.0, 0.65, 0.20, 0.40), 51.0],
-	"gem": [Color(0.32, 0.85, 1.0, 0.35), 34.0],
-	"rub": [Color(1.0, 0.34, 0.46, 0.34), 32.0],
-	"bug": [Color(0.80, 0.48, 1.0, 0.31), 34.0],
-	"key": [Color(1.0, 0.80, 0.36, 0.27), 26.0],
+	"gs": [Color(1.0, 0.65, 0.20, 0.39), 22.0, 90.0],
+	"gm": [Color(1.0, 0.65, 0.20, 0.45), 30.0, 115.0],
+	"gl": [Color(1.0, 0.65, 0.20, 0.51), 37.0, 145.0],
+	"gx": [Color(1.0, 0.65, 0.20, 0.56), 46.0, 175.0],
+	"gem": [Color(0.32, 0.85, 1.0, 0.53), 32.0, 125.0],
+	"rub": [Color(1.0, 0.34, 0.46, 0.51), 30.0, 120.0],
+	"bug": [Color(0.80, 0.48, 1.0, 0.47), 31.0, 120.0],
+	"key": [Color(1.0, 0.80, 0.36, 0.38), 24.0, 95.0],
 }
-const LAMP_STRENGTH := 0.38
-const LAMP_RADIUS := 148.0
-const LAVA_COLOR := Color(1.0, 0.24, 0.08, 0.42)
-const LAVA_RADIUS := 92.0
-const HEAD_COLOR := Color(1.0, 0.88, 0.58, 0.26)
-const HEAD_RADIUS := 38.0
+const LAMP_STRENGTH := 0.77
+const LAMP_FALLOFF := 154.0
+const LAMP_REACH := 1040.0
+const LAVA_COLOR := Color(1.0, 0.24, 0.08, 0.64)
+const HEAD_COLOR := Color(1.0, 0.88, 0.58, 0.34)
 # 沿用任务 01、02 量出的 52 个头灯灯芯坐标。按原图 512×512 记。
 const HEAD_LAMPS := [
 	{
@@ -63,13 +65,14 @@ var _miners: Dictionary
 var _divisor: int
 var _bounce: float
 var _shadow: float
+var _keep_dark_glow: bool
+var _dark := 0.0
 var _active := false
 var _mask_vp: SubViewport
-var _light_vp: SubViewport
-var _resolve_vp: SubViewport
+var _distance_vp: SubViewport
+var _passes: Array[SubViewport] = []
 var _emitters := Node2D.new()
 var _mask_mat := ShaderMaterial.new()
-var _resolve_mat := ShaderMaterial.new()
 var _receive_mat := ShaderMaterial.new()
 var _mask_nodes := {}
 var _moving_lights := {}
@@ -77,12 +80,13 @@ var _tier_lights := Node2D.new()
 var _overlay: ColorRect
 
 
-func _init(items: Dictionary, miners: Dictionary, divisor: int, bounce: float, shadow: float) -> void:
+func _init(items: Dictionary, miners: Dictionary, divisor: int, bounce: float, shadow: float, keep_dark_glow: bool) -> void:
 	_items = items
 	_miners = miners
 	_divisor = divisor
 	_bounce = bounce
 	_shadow = shadow
+	_keep_dark_glow = keep_dark_glow
 
 
 func _ready() -> void:
@@ -95,33 +99,38 @@ func _ready() -> void:
 	_mask_vp.add_child(_rect(Color.BLACK))
 	_mask_mat.shader = SH_MASK
 
-	var size := Vector2i(DESIGN_SIZE.x / _divisor, DESIGN_SIZE.y / _divisor)
-	_light_vp = _viewport(size)
-	_light_vp.name = "Emission"
-	_light_vp.add_child(_rect(Color.BLACK))
+	var nearest := _jfa_pass(_mask_vp, 0)
+	for jump in JFA_JUMPS:
+		nearest = _jfa_pass(nearest, jump)
+	_distance_vp = _viewport(DESIGN_SIZE)
+	_distance_vp.name = "Distance"
+	var distance_mat := _pass_material(_distance_vp, SH_DISTANCE)
+	distance_mat.set_shader_parameter("seeds", nearest.get_texture())
+	distance_mat.set_shader_parameter("mask_tex", _mask_vp.get_texture())
+	distance_mat.set_shader_parameter("design_size", DESIGN_SIZE)
+	_distance_vp.add_child(nearest)
+
+	var size := DESIGN_SIZE / _divisor
+	var light_vp := _viewport(size)
+	light_vp.name = "Emission"
+	light_vp.add_child(_rect(Color.BLACK))
 	_emitters.scale = Vector2.ONE / float(_divisor)
 	_emitters.add_child(_tier_lights)
-	_light_vp.add_child(_emitters)
+	light_vp.add_child(_emitters)
+	light_vp.add_child(_distance_vp)
 
-	_resolve_vp = _viewport(size)
-	_resolve_vp.name = "Resolve"
-	# 解算贴图的 RGB 装反光、A 装阴影，写入时保留独立的四个通道。
-	_resolve_vp.transparent_bg = true
-	_resolve_mat.shader = SH_RESOLVE
-	_resolve_mat.set_shader_parameter("design_px", DESIGN_PX)
-	_resolve_mat.set_shader_parameter("mask_tex", _mask_vp.get_texture())
-	_resolve_mat.set_shader_parameter("light_tex", _light_vp.get_texture())
-	var resolve := _rect(Color.WHITE)
-	resolve.material = _resolve_mat
-	_resolve_vp.add_child(resolve)
-	# 视口按从内到外的顺序绘制，遮挡先于发光，解算先于主井。
-	_light_vp.add_child(_mask_vp)
-	_resolve_vp.add_child(_light_vp)
-	add_child(_resolve_vp)
+	var resolve_vp := _viewport(size)
+	resolve_vp.name = "Resolve"
+	var resolve_mat := _pass_material(resolve_vp, SH_RESOLVE)
+	resolve_mat.set_shader_parameter("light_px", Vector2.ONE / Vector2(size))
+	resolve_mat.set_shader_parameter("light_tex", light_vp.get_texture())
+	# 嵌套视口让遮挡和距离场先于射线渲染，滤波先于主井。
+	resolve_vp.add_child(light_vp)
+	add_child(resolve_vp)
 
 	var overlay_mat := ShaderMaterial.new()
 	overlay_mat.shader = SH_BACKGROUND
-	overlay_mat.set_shader_parameter("resolved_tex", _resolve_vp.get_texture())
+	overlay_mat.set_shader_parameter("resolved_tex", resolve_vp.get_texture())
 	overlay_mat.set_shader_parameter("bounce_strength", _bounce)
 	overlay_mat.set_shader_parameter("shadow_strength", _shadow)
 	_overlay = ColorRect.new()
@@ -133,8 +142,30 @@ func _ready() -> void:
 	add_child(_overlay)
 
 	_receive_mat.shader = SH_RECEIVE
-	_receive_mat.set_shader_parameter("resolved_tex", _resolve_vp.get_texture())
+	_receive_mat.set_shader_parameter("resolved_tex", resolve_vp.get_texture())
 	_receive_mat.set_shader_parameter("bounce_strength", _bounce)
+
+
+func _jfa_pass(previous: SubViewport, jump: int) -> SubViewport:
+	var vp := _viewport(DESIGN_SIZE)
+	vp.name = "Seed" if jump == 0 else "Jump%d" % jump
+	# RGBA 存的是整数坐标，透明通道也要保留。
+	vp.transparent_bg = true
+	var mat := _pass_material(vp, SH_JFA)
+	mat.set_shader_parameter("src", previous.get_texture())
+	mat.set_shader_parameter("design_size", DESIGN_SIZE)
+	mat.set_shader_parameter("jump", jump)
+	vp.add_child(previous)
+	return vp
+
+
+func _pass_material(vp: SubViewport, shader: Shader) -> ShaderMaterial:
+	var mat := ShaderMaterial.new()
+	mat.shader = shader
+	var rect := _rect(Color.WHITE)
+	rect.material = mat
+	vp.add_child(rect)
+	return mat
 
 
 func _viewport(size: Vector2i) -> SubViewport:
@@ -143,6 +174,7 @@ func _viewport(size: Vector2i) -> SubViewport:
 	vp.disable_3d = true
 	vp.gui_disable_input = true
 	vp.render_target_update_mode = SubViewport.UPDATE_DISABLED
+	_passes.append(vp)
 	return vp
 
 
@@ -155,20 +187,33 @@ func _rect(color: Color) -> ColorRect:
 
 
 func set_tier(conf: Dictionary, lava: bool) -> void:
-	_resolve_mat.set_shader_parameter("light_dir", conf.light_dir)
 	for light in _tier_lights.get_children():
 		_tier_lights.remove_child(light)
 		light.queue_free()
 	for pos in conf.lamps:
-		var lamp := _new_light(_tier_lights, Color(conf.light_col, LAMP_STRENGTH), LAMP_RADIUS, 0.0)
+		var lamp := _new_light(_tier_lights, Color(conf.light_col, LAMP_STRENGTH),
+			Vector2(LAMP_FALLOFF, LAMP_REACH), 0.0, 24.0)
+		lamp.material.set_shader_parameter("light_dir", conf.light_dir)
 		_move_light(lamp, pos)
 	if lava:
-		var magma := _new_light(_tier_lights, LAVA_COLOR, LAVA_RADIUS, 0.0, Cfg.GW * 0.5)
+		var magma := _new_light(_tier_lights, LAVA_COLOR, Vector2(88.0, 400.0), 0.0, 30.0, Cfg.GW * 0.5)
 		_move_light(magma, Vector2(Cfg.GW * 0.5, Cfg.GH))
 
 
 func set_dark(dark: float) -> void:
-	_resolve_mat.set_shader_parameter("light_fade", 1.0 - dark)
+	_dark = dark
+	_overlay.material.set_shader_parameter("ambient_fade", 1.0 - dark)
+	for light in _tier_lights.get_children():
+		_update_light_fade(light)
+	for light in _moving_lights.values():
+		_update_light_fade(light)
+
+
+func _update_light_fade(light: ColorRect) -> void:
+	var fade := (1.0 - _dark) * (1.0 - _dark)
+	if _keep_dark_glow and light.get_meta("dark_glow", false):
+		fade = lerpf(1.0, 0.65, _dark)
+	light.material.set_shader_parameter("light_fade", fade)
 
 
 func set_active(on: bool) -> void:
@@ -177,7 +222,7 @@ func set_active(on: bool) -> void:
 	_active = on
 	set_process(on)
 	_overlay.visible = on
-	for vp in [_mask_vp, _light_vp, _resolve_vp]:
+	for vp in _passes:
 		vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS if on else SubViewport.UPDATE_DISABLED
 	if not on:
 		for item in _items.values():
@@ -185,19 +230,26 @@ func set_active(on: bool) -> void:
 				item.sprite.material = null
 
 
-func _new_light(parent: Node2D, color: Color, radius: float, skip: float, half_width: float = 0.0) -> ColorRect:
+func _new_light(parent: Node2D, color: Color, range_px: Vector2, skip: float, width: float,
+		half_width: float = 0.0, dark_glow: bool = false) -> ColorRect:
 	var light := ColorRect.new()
 	light.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	light.size = Vector2(2.0 * (radius + half_width), 2.0 * radius)
+	light.size = Vector2(2.0 * (range_px.y + half_width), 2.0 * range_px.y)
 	var mat := ShaderMaterial.new()
 	mat.shader = SH_LIGHT
-	mat.set_shader_parameter("mask_tex", _mask_vp.get_texture())
+	mat.set_shader_parameter("distance_tex", _distance_vp.get_texture())
 	mat.set_shader_parameter("design_size", Vector2(DESIGN_SIZE))
 	mat.set_shader_parameter("energy", Vector4(color.r, color.g, color.b, color.a))
-	mat.set_shader_parameter("radius", radius)
+	mat.set_shader_parameter("falloff_px", range_px.x)
+	mat.set_shader_parameter("reach", range_px.y)
 	mat.set_shader_parameter("source_skip", skip)
+	mat.set_shader_parameter("source_width", width)
 	mat.set_shader_parameter("line_half_width", half_width)
+	mat.set_shader_parameter("shadow_strength", _shadow)
 	light.material = mat
+	if dark_glow:
+		light.set_meta("dark_glow", true)
+	_update_light_fade(light)
 	parent.add_child(light)
 	return light
 
@@ -207,12 +259,13 @@ func _move_light(light: ColorRect, center: Vector2) -> void:
 	light.material.set_shader_parameter("center", center)
 
 
-func _sync_light(source: Sprite2D, center: Vector2, color: Color, radius: float, skip: float, seen: Dictionary) -> void:
+func _sync_light(source: Sprite2D, center: Vector2, color: Color, range_px: Vector2, skip: float,
+		width: float, dark_glow: bool, seen: Dictionary) -> void:
 	var id := source.get_instance_id()
 	seen[id] = true
 	var light: ColorRect = _moving_lights.get(id)
 	if light == null:
-		light = _new_light(_emitters, color, radius, skip)
+		light = _new_light(_emitters, color, range_px, skip, width, 0.0, dark_glow)
 		_moving_lights[id] = light
 	_move_light(light, center)
 	light.material.set_shader_parameter("opacity", source.get_parent().modulate.a)
@@ -278,9 +331,10 @@ func _process(_dt: float) -> void:
 			sprite.material = _receive_mat
 		if ITEM_EMISSION.has(item.kind):
 			var emission: Array = ITEM_EMISSION[item.kind]
-			# 发光点在贴图内，短射线跳过自己的发光核心。
+			# 光线抵达发光点前停在它的表面，避免核心被自身遮住。
 			var skip := sprite.texture.get_width() * sprite.scale.x * 0.40
-			_sync_light(sprite, pose.origin, emission[0], emission[1], skip, seen_lights)
+			_sync_light(sprite, pose.origin, emission[0], Vector2(emission[1], emission[2]),
+				skip, maxf(2.0, skip * 0.42), true, seen_lights)
 	for miner in _miners.values():
 		var sprite: Sprite2D = miner.sprite
 		var pose := to_design * sprite.global_transform
@@ -291,6 +345,6 @@ func _process(_dt: float) -> void:
 			_sync_rope(hook.rope_edge, to_design * hook.rope_edge.global_transform, seen_masks)
 			var source: Vector2 = HEAD_LAMPS[miner.c][miner.frame]
 			var head := pose * ((source / 512.0 - Vector2.ONE * 0.5) * sprite.texture.get_size())
-			_sync_light(sprite, head, HEAD_COLOR, HEAD_RADIUS, 8.0, seen_lights)
+			_sync_light(sprite, head, HEAD_COLOR, Vector2(42.0, 145.0), 8.0, 9.0, false, seen_lights)
 	_remove_old(_mask_nodes, seen_masks)
 	_remove_old(_moving_lights, seen_lights)

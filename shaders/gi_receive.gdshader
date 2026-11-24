@@ -13,7 +13,7 @@ void vertex() {
 
 void fragment() {
 	vec3 bounce = texture(resolved_tex, light_uv).rgb;
-	vec3 gain = min(bounce * bounce_strength * 0.55, vec3(0.20));
+	vec3 gain = 0.65 * (1.0 - exp(-bounce * bounce_strength * 0.85));
 	float headroom = 1.0 - max(COLOR.r, max(COLOR.g, COLOR.b));
 	COLOR.rgb *= 1.0 + gain * headroom;
 }

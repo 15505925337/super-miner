@@ -106,6 +106,7 @@ var emo_box: VBoxContainer
 var help: Control
 var mute_btn: Button
 var _last_ph := ""
+var demo_only := false
 
 
 # 标题下面的分隔线：两头淡出的细金线，中间一个小菱形
@@ -140,6 +141,9 @@ func _ready() -> void:
 	hud_text.size = size
 	hud_text.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(hud_text)
+	if demo_only:
+		set_process(false)
+		return
 	_build_home()
 	_build_lobby()
 	_build_hud()
@@ -180,7 +184,7 @@ func _ready() -> void:
 
 # 有面板开着（主场景据此把后面的游戏画面虚化、压暗）
 func menu_open() -> bool:
-	return home.visible or lobby.visible or rend.visible or shop.visible or over.visible or solo_over.visible or help.visible
+	return not demo_only and (home.visible or lobby.visible or rend.visible or shop.visible or over.visible or solo_over.visible or help.visible)
 
 
 # ───── 样式 ─────
@@ -491,6 +495,8 @@ func _screen_bg(texture: Texture2D) -> Sprite2D:
 
 func set_draw_area(area: Rect2) -> void:
 	_draw_area = area
+	if demo_only:
+		return
 	pause_shade.position = area.position
 	pause_shade.size = area.size
 	for bg in [home_bg, shop_bg]:
@@ -743,7 +749,7 @@ func draw_hud(huds: Array, split: bool) -> void:
 				_band(band.position, band.size)
 			_hud_text(o + Vector2(8, 3) * sc, Vector2(220, 16) * sc, String(h.plate), fs, CREAM, HORIZONTAL_ALIGNMENT_LEFT)
 			_hud_text(o + Vector2(170, 3) * sc, Vector2(300, 16) * sc, String(h.plank), fs, GOLD, HORIZONTAL_ALIGNMENT_CENTER)
-			var clock_x := 483 if cl.mode() == "solo" else 540
+			var clock_x := 483 if not demo_only and cl.mode() == "solo" else 540
 			_hud_text(o + Vector2(clock_x, 3) * sc, Vector2(92, 16) * sc, String(h.clock), fs, CREAM, HORIZONTAL_ALIGNMENT_RIGHT)
 			for p in h.players:
 				var x: float = float(p.x) * Cfg.S

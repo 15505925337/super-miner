@@ -367,11 +367,18 @@ func _apply_dark() -> void:
 		_set_miner_dark(m, d)
 
 
-func set_gi(on: bool, divisor: int, bounce: float, shadow: float) -> void:
+# 演示局从首帧进入指定明暗。
+func set_dark_now(dark: float) -> void:
+	_dark = dark
+	_dark_want = dark
+	_apply_dark()
+
+
+func set_gi(on: bool, divisor: int, bounce: float, shadow: float, keep_dark_glow: bool) -> void:
 	if _gi == null:
 		if not on:
 			return
-		_gi = GI.new(_items, _miners, divisor, bounce, shadow)
+		_gi = GI.new(_items, _miners, divisor, bounce, shadow, keep_dark_glow)
 		add_child(_gi)
 		_gi.set_tier(TIERS[_tier], _tier == 3)
 		_gi.set_dark(_dark_done)
