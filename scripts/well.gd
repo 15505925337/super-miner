@@ -20,6 +20,7 @@ const BG_SHADER := preload("res://shaders/bg.gdshader")
 const LAVA_CRACKS := preload("res://art/relief_3_e.png")
 const LAVA_CRACK_STRENGTH := 0.60
 const DARK_AMBIENT := Color(0.06, 0.06, 0.09)
+const CAVE_TOP := 80.0
 const MINER_SIZE := 64.0
 const DARK_MINER_BRIGHTNESS := 0.40
 const MINER_SOURCE_SIZE := 512.0
@@ -175,7 +176,7 @@ func _set_tier(tier: int) -> void:
 	for n in _items.values():
 		_set_item_lighting(n)
 	if _gi != null:
-		_gi.set_tier(t, tier == 3)
+		_gi.set_tier(t, tier == 3, CAVE_TOP if tier == 0 else 0.0)
 	apply(quality, fx_on)
 
 
@@ -297,12 +298,12 @@ func miner_pos(id: int) -> Vector2:
 # 井壁、远景与支架在窗口露出的范围内按同一坐标镜像。剪影贴着实际画面四边，避免在中央竖起两道剪影。
 func set_draw_area(area: Rect2) -> void:
 	var visible_area := area.merge(Rect2(0, 0, Cfg.GW, Cfg.GH)).grow(4.0)
-	var cave := Rect2(visible_area.position.x, 80.0, visible_area.size.x, visible_area.end.y - 80.0)
+	var cave := Rect2(visible_area.position.x, CAVE_TOP, visible_area.size.x, visible_area.end.y - CAVE_TOP)
 	bg.position = cave.position
 	bg.region_rect = Rect2(cave.position * 3.0, cave.size * 3.0)
 	emis.position = cave.position
 	emis.region_rect = Rect2(cave.position * 1.5, cave.size * 1.5)
-	var passage := Rect2(visible_area.position.x, 0.0, visible_area.size.x, 80.0)
+	var passage := Rect2(visible_area.position.x, 0.0, visible_area.size.x, CAVE_TOP)
 	far.position = passage.position
 	far.region_rect = Rect2(passage.position * 3.0, passage.size * 3.0)
 	frame_layer.position = far.position
@@ -380,7 +381,7 @@ func set_gi(on: bool, divisor: int, bounce: float, shadow: float, keep_dark_glow
 			return
 		_gi = GI.new(_items, _miners, divisor, bounce, shadow, keep_dark_glow)
 		add_child(_gi)
-		_gi.set_tier(TIERS[_tier], _tier == 3)
+		_gi.set_tier(TIERS[_tier], _tier == 3, CAVE_TOP if _tier == 0 else 0.0)
 		_gi.set_dark(_dark_done)
 	_gi.set_active(on)
 

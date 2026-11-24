@@ -1,8 +1,7 @@
-// 直射光和井壁方向遮挡共用同一段软影步进。
+// 井壁方向遮挡的距离场步进。
 uniform sampler2D distance_tex : filter_linear, repeat_disable;
 uniform vec2 design_size;
 
-const int RAY_COUNT = 5;
 const int MAX_STEPS = 64;
 const float SHADOW_FADE_START = 18.0;
 const float SHADOW_FADE_END = 178.0;
@@ -13,10 +12,10 @@ vec3 sample_field(vec2 point) {
 	return texture(distance_tex, point / design_size).rgb;
 }
 
-float trace_visibility(vec2 origin, vec2 target, float origin_coverage, float skip_px) {
+float trace_visibility(vec2 origin, vec2 target, float origin_coverage) {
 	vec2 delta = target - origin;
 	float span = length(delta);
-	float end = min(span - skip_px, SHADOW_FADE_END);
+	float end = min(span, SHADOW_FADE_END);
 	if (end <= 0.75) {
 		return 1.0;
 	}
