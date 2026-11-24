@@ -7,6 +7,7 @@ extends Node2D
 const Cfg = preload("res://scripts/cfg.gd")
 const ITEM := preload("res://scenes/item.tscn")
 const HOOK := preload("res://scenes/hook.tscn")
+const GI := preload("res://scripts/gi.gd")
 const LIGHT_TEX := preload("res://res/light_radial.tres")
 const HALO := preload("res://res/halo.tres")
 const SOFT_SHADOW := preload("res://res/soft_shadow.tres")
@@ -81,6 +82,7 @@ var bloom := 0.06                # 当前层要的泛光强度，主场景来读
 var _k := 1.0
 var _items := {}                 # 物件 id → 节点
 var _miners := {}                # 玩家 id → { root, sprite, shadow, hook, frames, ice }
+var _gi: GI
 var _extra: Array[PointLight2D] = []
 var _t := 0.0
 var _tier := -1
@@ -172,6 +174,8 @@ func _set_tier(tier: int) -> void:
 		lights_root.add_child(node)
 	for n in _items.values():
 		_set_item_lighting(n)
+	if _gi != null:
+		_gi.set_tier(t, tier == 3)
 	apply(quality, fx_on)
 
 
@@ -234,6 +238,7 @@ func set_view(items: Array, players: Array, info: Dictionary) -> void:
 		var hauling := st == 2 or st == 4
 		var frame := String(p.get("frame", "idle"))
 		m.sprite.texture = m.frames[frame]
+		m.frame = frame
 		# 动作帧已画好身体起伏，整张图保持固定，让木台贴着台沿。
 		m.root.position = Vector2(x, ledge - MINER_LEDGE_OFFSET)
 		m.ice.visible = int(p.fz) == 1
@@ -351,6 +356,8 @@ func _set_miner_dark(m: Dictionary, dark: float) -> void:
 func _apply_dark() -> void:
 	var d := _dark
 	_dark_done = d
+	if _gi != null:
+		_gi.set_dark(d)
 	ambient.color = Color.WHITE.lerp(DARK_AMBIENT, d)
 	lights_root.modulate.a = 1.0 - d
 	embers.modulate.a = 1.0 - d
@@ -358,6 +365,17 @@ func _apply_dark() -> void:
 		_set_item_look(n)
 	for m in _miners.values():
 		_set_miner_dark(m, d)
+
+
+func set_gi(on: bool, divisor: int, bounce: float, shadow: float) -> void:
+	if _gi == null:
+		if not on:
+			return
+		_gi = GI.new(_items, _miners, divisor, bounce, shadow)
+		add_child(_gi)
+		_gi.set_tier(TIERS[_tier], _tier == 3)
+		_gi.set_dark(_dark_done)
+	_gi.set_active(on)
 
 
 # 单次播放。用同一组图中可见范围最大的一帧对齐目标尺寸。

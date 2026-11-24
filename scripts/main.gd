@@ -9,7 +9,8 @@
 # 画面按 640×360 设计。窗口正好是整数倍时用整数倍；不是整数倍时按比例放大到铺满（用户定的）。
 #
 # 启动参数（桌面版写在 -- 后面，如 -- --q=mid；网页版写在网址问号后面，如 ?q=mid&r=1234）：
-#   q=high|mid|low   画质            fx=0          关掉全部光影
+#   q=ultra|high|mid|low  画质       fx=0          关掉全部光影
+#   gi=0|1           超高档全局光照  gib/gis/gir   反光、阴影、分辨率除数
 #   r=<房间号>       直接进这个房间   name=<名字>   玩家名字
 #   server=<地址>    服务端地址（桌面版用，默认 ws://127.0.0.1:8060）
 #   tier=0..3        强制显示第几层的画面（只影响显示，看图用）
@@ -24,6 +25,7 @@ const Cfg = preload("res://scripts/cfg.gd")
 const WELL := preload("res://scenes/well.tscn")
 const CLIENT := preload("res://scripts/client.gd")
 const UI := preload("res://scripts/ui.gd")
+const GI := preload("res://scripts/gi.gd")
 const SH_DOWN := preload("res://shaders/bloom_down.gdshader")
 const SH_UP := preload("res://shaders/bloom_up.gdshader")
 const SH_FINAL := preload("res://shaders/final.gdshader")
@@ -65,6 +67,11 @@ var _bloom := -1.0
 var _focus_t := 0.0
 var _menu := 0.0
 var _last_view := {}
+var _gi_requested := true
+var _gi_active := false
+var _gi_divisor := GI.DEFAULT_DIVISOR
+var _gi_bounce := GI.DEFAULT_BOUNCE
+var _gi_shadow := GI.DEFAULT_SHADOW
 
 
 func _ready() -> void:
@@ -73,6 +80,12 @@ func _ready() -> void:
 	var qi := Cfg.Q_NAMES.find(String(args.get("q", "high")))
 	quality = qi if qi >= 0 else Cfg.Q.HIGH
 	fx_on = String(args.get("fx", "1")) != "0"
+	_gi_requested = String(args.get("gi", "1")) != "0"
+	var divisor := String(args.get("gir", str(GI.DEFAULT_DIVISOR)))
+	if divisor in ["1", "2", "4"]:
+		_gi_divisor = int(divisor)
+	_gi_bounce = _gi_strength("gib", GI.DEFAULT_BOUNCE)
+	_gi_shadow = _gi_strength("gis", GI.DEFAULT_SHADOW)
 
 	# 分屏用的四块小画布，要排在玩法层前面，保证同一帧里先画好
 	for i in int(Cfg.b().MAXP):
@@ -198,9 +211,19 @@ func _make_pass(shader: Shader) -> Array:
 	return [vp, m]
 
 
+func _gi_strength(key: String, fallback: float) -> float:
+	var value := String(args.get(key, str(fallback)))
+	return clampf(float(value), 0.0, 2.0) if value.is_valid_float() else fallback
+
+
+func _update_gi() -> void:
+	_gi_active = quality == Cfg.Q.ULTRA and _gi_requested and fx_on and not _split
+	well.set_gi(_gi_active, _gi_divisor, _gi_bounce, _gi_shadow)
+
+
 # 按当前画质和光影开关，把各层的参数设好
 func _apply() -> void:
-	var hi := quality == Cfg.Q.HIGH
+	var hi := quality >= Cfg.Q.HIGH
 	var low := quality == Cfg.Q.LOW
 	well.apply(quality, fx_on)
 	for p in panes:
@@ -213,6 +236,8 @@ func _apply() -> void:
 		up_vps[i].render_target_update_mode = SubViewport.UPDATE_ALWAYS if (bloom_on and i < levels - 1) else SubViewport.UPDATE_DISABLED
 	_bloom = -1.0
 	_layout()
+	_update_gi()
+	label.position.y = 4.0 if quality == Cfg.Q.ULTRA else 348.0
 
 
 # 窗口大小变了（或画质变了）时重新排版
@@ -225,7 +250,7 @@ func _layout() -> void:
 	k = floorf(fit) if (fit >= 1.0 and fit - floorf(fit) < 0.04) else fit
 	# 窗口比例不是 16:9 时：左右居中、顶边对齐，多出来的地方露出更多底图（不放矿石）
 	off = Vector2(floorf((ws.x - Cfg.GW * k) / 2.0), 0.0)
-	var hi := quality == Cfg.Q.HIGH
+	var hi := quality >= Cfg.Q.HIGH
 
 	world_vp.size = ws
 	well.scale = Vector2(k, k)
@@ -316,7 +341,7 @@ func _unhandled_key_input(e: InputEvent) -> void:
 				quality = maxi(Cfg.Q.LOW, quality - 1)
 				_apply()
 			KEY_BRACKETRIGHT:
-				quality = mini(Cfg.Q.HIGH, quality + 1)
+				quality = mini(Cfg.Q.ULTRA, quality + 1)
 				_apply()
 			KEY_BACKSLASH:
 				fx_on = not fx_on
@@ -342,6 +367,7 @@ func _process(dt: float) -> void:
 		_split = view.split
 		split_root.visible = _split
 		well.visible = not _split
+		_update_gi()
 		for p in panes:
 			p.vp.render_target_update_mode = SubViewport.UPDATE_DISABLED
 			p.rect.visible = false
@@ -427,6 +453,7 @@ func _stats() -> Dictionary:
 	var ws: Vector2i = get_tree().root.size
 	return {
 		"q": Cfg.Q_NAMES[quality], "fx": fx_on, "fps": snappedf(_fps, 0.1), "w": ws.x, "h": ws.y, "k": snappedf(k, 0.001),
+		"gi": int(_gi_active), "gir": _gi_divisor if quality == Cfg.Q.ULTRA else 0,
 		"lights": well.light_count(), "ready_ms": roundi(_ready_ms), "gpu": RenderingServer.get_video_adapter_name(), "frames": _frames,
 	}
 

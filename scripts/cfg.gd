@@ -5,8 +5,8 @@ const GW := 640                      # 设计基准宽（游戏像素）
 const GH := 360                      # 设计基准高
 const S := 0.5                       # 服务端坐标（原型的 1280×720）换成游戏像素要乘的倍数
 
-enum Q { LOW, MID, HIGH }
-const Q_NAMES := ["low", "mid", "high"]
+enum Q { LOW, MID, HIGH, ULTRA }
+const Q_NAMES := ["low", "mid", "high", "ultra"]
 
 # 四个角色的颜色：红、蓝、绿、紫
 const COLORS := [Color("ff6f61"), Color("45c8f0"), Color("7be08a"), Color("b99aff")]
