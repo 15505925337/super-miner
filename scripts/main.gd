@@ -11,7 +11,7 @@
 # 启动参数（桌面版写在 -- 后面，如 -- --q=mid；网页版写在网址问号后面，如 ?q=mid&r=1234）：
 #   q=ultra|high|mid|low  画质       fx=0          关掉全部光影
 #   gi=0|1           超高档全局光照  gib/gis/gir   反光、阴影、分辨率除数
-#   gid=1            黑灯保留值钱物件的彩光
+#   gid=0            关掉黑灯时值钱物件的彩光（默认保留）
 #   demo=1           固定演示局      dark=1       演示局固定黑灯
 #   r=<房间号>       直接进这个房间   name=<名字>   玩家名字
 #   server=<地址>    服务端地址（桌面版用，默认 ws://127.0.0.1:8060）
@@ -80,7 +80,7 @@ var _gi_active := false
 var _gi_divisor := GI.DEFAULT_DIVISOR
 var _gi_bounce := GI.DEFAULT_BOUNCE
 var _gi_shadow := GI.DEFAULT_SHADOW
-var _gi_dark_glow := false
+var _gi_dark_glow := true
 var _demo_view := {}
 var _demo_time := 0.0
 
@@ -97,7 +97,7 @@ func _ready() -> void:
 		_gi_divisor = int(divisor)
 	_gi_bounce = _gi_strength("gib", GI.DEFAULT_BOUNCE)
 	_gi_shadow = _gi_strength("gis", GI.DEFAULT_SHADOW)
-	_gi_dark_glow = args.get("gid", "0") == "1"
+	_gi_dark_glow = args.get("gid", "1") == "1"
 	if args.get("demo", "0") == "1":
 		_prepare_demo()
 

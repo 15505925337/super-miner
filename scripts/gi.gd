@@ -10,7 +10,7 @@ const SH_RESOLVE := preload("res://shaders/gi_resolve.gdshader")
 const SH_BACKGROUND := preload("res://shaders/gi_background.gdshader")
 const SH_RECEIVE := preload("res://shaders/gi_receive.gdshader")
 const DEFAULT_DIVISOR := 2
-const DEFAULT_BOUNCE := 1.35
+const DEFAULT_BOUNCE := 1.10
 const DEFAULT_SHADOW := 1.45
 const JFA_JUMPS := [512, 256, 128, 64, 32, 16, 8, 4, 2, 1, 1]
 const DESIGN_SIZE := Vector2i(Cfg.GW, Cfg.GH)
@@ -18,18 +18,18 @@ const DESIGN_PX := Vector2.ONE / Vector2(DESIGN_SIZE)
 
 # 颜色和中心强度（RGBA）、衰减尺度、光照覆盖半径（设计像素）。
 const ITEM_EMISSION := {
-	"gs": [Color(1.0, 0.65, 0.20, 0.39), 22.0, 90.0],
-	"gm": [Color(1.0, 0.65, 0.20, 0.45), 30.0, 115.0],
-	"gl": [Color(1.0, 0.65, 0.20, 0.51), 37.0, 145.0],
-	"gx": [Color(1.0, 0.65, 0.20, 0.56), 46.0, 175.0],
-	"gem": [Color(0.32, 0.85, 1.0, 0.53), 32.0, 125.0],
-	"rub": [Color(1.0, 0.34, 0.46, 0.51), 30.0, 120.0],
-	"bug": [Color(0.80, 0.48, 1.0, 0.47), 31.0, 120.0],
-	"key": [Color(1.0, 0.80, 0.36, 0.38), 24.0, 95.0],
+	"gs": [Color(1.0, 0.65, 0.20, 0.39), 22.0, 72.0],
+	"gm": [Color(1.0, 0.65, 0.20, 0.45), 30.0, 92.0],
+	"gl": [Color(1.0, 0.65, 0.20, 0.51), 37.0, 116.0],
+	"gx": [Color(1.0, 0.65, 0.20, 0.56), 46.0, 140.0],
+	"gem": [Color(0.32, 0.85, 1.0, 0.53), 32.0, 100.0],
+	"rub": [Color(1.0, 0.34, 0.46, 0.51), 30.0, 96.0],
+	"bug": [Color(0.80, 0.48, 1.0, 0.47), 31.0, 96.0],
+	"key": [Color(1.0, 0.80, 0.36, 0.38), 24.0, 76.0],
 }
 const LAMP_STRENGTH := 0.77
-const LAMP_FALLOFF := 154.0
-const LAMP_REACH := 1040.0
+const LAMP_FALLOFF := 72.0
+const LAMP_REACH := 224.0
 const LAVA_COLOR := Color(1.0, 0.24, 0.08, 0.64)
 const HEAD_COLOR := Color(1.0, 0.88, 0.58, 0.34)
 # 沿用任务 01、02 量出的 52 个头灯灯芯坐标。按原图 512×512 记。
@@ -132,7 +132,6 @@ func _ready() -> void:
 	overlay_mat.shader = SH_BACKGROUND
 	overlay_mat.set_shader_parameter("resolved_tex", resolve_vp.get_texture())
 	overlay_mat.set_shader_parameter("bounce_strength", _bounce)
-	overlay_mat.set_shader_parameter("shadow_strength", _shadow)
 	_overlay = ColorRect.new()
 	_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_overlay.size = Vector2(DESIGN_SIZE)
@@ -196,13 +195,14 @@ func set_tier(conf: Dictionary, lava: bool) -> void:
 		lamp.material.set_shader_parameter("light_dir", conf.light_dir)
 		_move_light(lamp, pos)
 	if lava:
-		var magma := _new_light(_tier_lights, LAVA_COLOR, Vector2(88.0, 400.0), 0.0, 30.0, Cfg.GW * 0.5)
+		var magma := _new_light(_tier_lights, LAVA_COLOR, Vector2(34.0, 172.0), 0.0, 30.0, Cfg.GW * 0.5)
 		_move_light(magma, Vector2(Cfg.GW * 0.5, Cfg.GH))
 
 
 func set_dark(dark: float) -> void:
 	_dark = dark
-	_overlay.material.set_shader_parameter("ambient_fade", 1.0 - dark)
+	_overlay.material.set_shader_parameter("darkness", dark)
+	_receive_mat.set_shader_parameter("light_fade", 1.0 - dark)
 	for light in _tier_lights.get_children():
 		_update_light_fade(light)
 	for light in _moving_lights.values():
@@ -345,6 +345,6 @@ func _process(_dt: float) -> void:
 			_sync_rope(hook.rope_edge, to_design * hook.rope_edge.global_transform, seen_masks)
 			var source: Vector2 = HEAD_LAMPS[miner.c][miner.frame]
 			var head := pose * ((source / 512.0 - Vector2.ONE * 0.5) * sprite.texture.get_size())
-			_sync_light(sprite, head, HEAD_COLOR, Vector2(42.0, 145.0), 8.0, 9.0, false, seen_lights)
+			_sync_light(sprite, head, HEAD_COLOR, Vector2(37.0, 116.0), 8.0, 9.0, false, seen_lights)
 	_remove_old(_mask_nodes, seen_masks)
 	_remove_old(_moving_lights, seen_lights)
