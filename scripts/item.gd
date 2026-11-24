@@ -2,7 +2,7 @@
 extends Node2D
 
 const Cfg = preload("res://scripts/cfg.gd")
-const RIM_SHADER := preload("res://shaders/sprite.gdshader")
+const SPRITE_SHADER := preload("res://shaders/sprite.gdshader")
 const SWEEP_SHADER := preload("res://shaders/gold_sweep.gdshader")
 const BEETLE_FRAMES := [preload("res://art/beetle.tres"), preload("res://art/beetle_2.tres")]
 const RIM_REACH := 3.0  # 从轮廓向内采样的最大距离，单位为游戏像素。
@@ -30,7 +30,9 @@ var _phase := 0.0
 var _spark_at := 0.0
 var _walk_t := 0.0
 var _walk_frame := 0
-var _rim_mat: ShaderMaterial
+var _sprite_mat: ShaderMaterial
+var _gi_texture: Texture2D
+var _gi_sample := Vector3.ZERO
 var _sweep_mat: ShaderMaterial
 var _sweep_cycle := 0.0
 var _sweep_offset := 0.0
@@ -53,15 +55,16 @@ func _ready() -> void:
 			art += "_%d" % shape
 	sprite.texture = load("res://art/%s.tres" % art)
 	glow.texture = sprite.texture
-	_rim_mat = ShaderMaterial.new()
-	_rim_mat.shader = RIM_SHADER
+	_sprite_mat = ShaderMaterial.new()
+	_sprite_mat.shader = SPRITE_SHADER
+	sprite.material = _sprite_mat
 	# 照原型的画法：整张图画成边长 = 碰撞半径 × 2.5 的正方形
 	_radius = float(Cfg.b().TYPES[Cfg.type_index(kind)].r) * Cfg.S
 	var d := _radius * 2.5
 	var sc: float = d / float(sprite.texture.get_width())
 	sprite.scale = Vector2(sc, sc)
 	glow.scale = sprite.scale
-	_rim_mat.set_shader_parameter("rim_px", RIM_REACH / sc)
+	_sprite_mat.set_shader_parameter("rim_px", RIM_REACH / sc)
 	# 金块、石头、化石各自带一个固定的倾斜角度，看着不那么整齐划一
 	if kind in Cfg.TILT:
 		var h := fmod(absf(sin(uid * 12.9898) * 43758.5453), 1.0)
@@ -88,8 +91,8 @@ func set_lighting(light_dir: Vector2, light_col: Color, under_col: Color) -> voi
 	_light_dir = light_dir
 	shadow.position = light_dir * clampf(_radius * 0.25, 1.4, 3.2)
 	spark.modulate = light_col
-	_rim_mat.set_shader_parameter("light_col", light_col)
-	_rim_mat.set_shader_parameter("under_col", under_col)
+	_sprite_mat.set_shader_parameter("light_col", light_col)
+	_sprite_mat.set_shader_parameter("under_col", under_col)
 	if _sweep_mat != null:
 		_sweep_mat.set_shader_parameter("light_col", light_col)
 	_update_light_axes()
@@ -102,8 +105,8 @@ func _update_light_axes() -> void:
 	if sprite.flip_h:
 		axis.x = -axis.x
 		under.x = -under.x
-	_rim_mat.set_shader_parameter("light_axis", axis)
-	_rim_mat.set_shader_parameter("under_axis", under)
+	_sprite_mat.set_shader_parameter("light_axis", axis)
+	_sprite_mat.set_shader_parameter("under_axis", under)
 	if _sweep_mat != null:
 		_sweep_mat.set_shader_parameter("sweep_axis", axis / (absf(axis.x) + absf(axis.y)))
 	if kind in Cfg.SPARKLE:
@@ -215,6 +218,16 @@ func set_look(detail: bool, dark: float, glow_strength: float, rim_strength: flo
 	if not detail:
 		spark.hide()
 	_update_glow()
-	sprite.material = _rim_mat if detail and dark < 1.0 else null
-	_rim_mat.set_shader_parameter("rim_strength", rim_strength)
-	_rim_mat.set_shader_parameter("light_fade", 1.0 - dark)
+	_sprite_mat.set_shader_parameter("rim_strength", rim_strength)
+	_sprite_mat.set_shader_parameter("light_fade", 1.0 - dark if detail else 0.0)
+
+
+func set_gi(light_tex: Texture2D, light_uv := Vector2.ZERO, bounce := 0.0, fade := 0.0) -> void:
+	if light_tex != _gi_texture:
+		_gi_texture = light_tex
+		_sprite_mat.set_shader_parameter("resolved_tex", light_tex)
+		_sprite_mat.set_shader_parameter("bounce_strength", bounce)
+	var sample := Vector3(light_uv.x, light_uv.y, fade)
+	if sample != _gi_sample:
+		_gi_sample = sample
+		_sprite_mat.set_shader_parameter("gi_sample", sample)

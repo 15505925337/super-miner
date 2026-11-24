@@ -9,7 +9,6 @@ const SH_LIGHT := preload("res://shaders/gi_light.gdshader")
 const SH_SHADOW := preload("res://shaders/gi_shadow.gdshader")
 const SH_RESOLVE := preload("res://shaders/gi_resolve.gdshader")
 const SH_BACKGROUND := preload("res://shaders/gi_background.gdshader")
-const SH_RECEIVE := preload("res://shaders/gi_receive.gdshader")
 const DEFAULT_DIVISOR := 2
 const DEFAULT_BOUNCE := 1.10
 const DEFAULT_SHADOW := 1.45
@@ -76,7 +75,7 @@ var _emitters := Node2D.new()
 var _mask_mat := ShaderMaterial.new()
 var _shadow_mat: ShaderMaterial
 var _resolve_mat: ShaderMaterial
-var _receive_mat := ShaderMaterial.new()
+var _resolved_tex: Texture2D
 var _mask_nodes := {}
 var _moving_lights := {}
 var _tier_lights := Node2D.new()
@@ -140,10 +139,11 @@ func _ready() -> void:
 	resolve_vp.add_child(light_vp)
 	resolve_vp.add_child(emission_vp)
 	add_child(resolve_vp)
+	_resolved_tex = resolve_vp.get_texture()
 
 	var overlay_mat := ShaderMaterial.new()
 	overlay_mat.shader = SH_BACKGROUND
-	overlay_mat.set_shader_parameter("resolved_tex", resolve_vp.get_texture())
+	overlay_mat.set_shader_parameter("resolved_tex", _resolved_tex)
 	overlay_mat.set_shader_parameter("emission_tex", emission_vp.get_texture())
 	overlay_mat.set_shader_parameter("bounce_strength", _bounce)
 	overlay_mat.set_shader_parameter("daylight_strength", _bounce / DEFAULT_BOUNCE)
@@ -154,10 +154,6 @@ func _ready() -> void:
 	_overlay.material = overlay_mat
 	_overlay.hide()
 	add_child(_overlay)
-
-	_receive_mat.shader = SH_RECEIVE
-	_receive_mat.set_shader_parameter("resolved_tex", resolve_vp.get_texture())
-	_receive_mat.set_shader_parameter("bounce_strength", _bounce)
 
 
 func _jfa_pass(previous: SubViewport, jump: int) -> SubViewport:
@@ -232,7 +228,6 @@ func set_dark(dark: float) -> void:
 	_dark = dark
 	_overlay.material.set_shader_parameter("darkness", dark)
 	_shadow_mat.set_shader_parameter("daylight", 1.0 - dark)
-	_receive_mat.set_shader_parameter("light_fade", 1.0 - dark)
 	for light in _tier_lights.get_children():
 		_update_light_fade(light)
 	for light in _moving_lights.values():
@@ -256,8 +251,7 @@ func set_active(on: bool) -> void:
 		vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS if on else SubViewport.UPDATE_DISABLED
 	if not on:
 		for item in _items.values():
-			if item.sprite.material == _receive_mat:
-				item.sprite.material = null
+			item.set_gi(null)
 
 
 func _new_light(parent: Node2D, color: Color, range_px: Vector2,
@@ -327,16 +321,13 @@ func _remove_old(nodes: Dictionary, seen: Dictionary) -> void:
 
 func _process(_dt: float) -> void:
 	var to_design := global_transform.affine_inverse()
-	_receive_mat.set_shader_parameter("well_origin", global_position)
-	_receive_mat.set_shader_parameter("well_inv_size", DESIGN_PX / global_scale)
 	var seen_masks := {}
 	var seen_lights := {}
 	for item in _items.values():
 		var sprite: Sprite2D = item.sprite
 		var pose := to_design * sprite.global_transform
 		_sync_sprite(sprite, pose, item.modulate.a, seen_masks)
-		if sprite.material != _receive_mat:
-			sprite.material = _receive_mat
+		item.set_gi(_resolved_tex, pose.origin * DESIGN_PX, _bounce, 1.0 - _dark)
 		if ITEM_EMISSION.has(item.kind):
 			var emission: Array = ITEM_EMISSION[item.kind]
 			_sync_light(sprite, pose.origin, emission[0], Vector2(emission[1], emission[2]), true, seen_lights)

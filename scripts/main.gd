@@ -9,7 +9,8 @@
 # 画面按 640×360 设计。窗口正好是整数倍时用整数倍；不是整数倍时按比例放大到铺满（用户定的）。
 #
 # 启动参数（桌面版写在 -- 后面，如 -- --q=mid；网页版写在网址问号后面，如 ?q=mid&r=1234）：
-#   q=ultra|high|mid|low  画质       fx=0          关掉全部光影
+#   q=ultra|high|mid|low  画质（电脑默认超高，手机和平板默认高）
+#   fx=0             关掉全部光影
 #   gi=0|1           超高档全局光照  gib/gis/gir   反光、阴影、分辨率除数
 #   gid=0            关掉黑灯时值钱物件的彩光（默认保留）
 #   demo=1           固定演示局      dark=1       演示局固定黑灯
@@ -40,7 +41,7 @@ const DEMO_LAYOUT := {
 	"rl": Vector2(158, 132), "rs": Vector2(475, 310), "tnt": Vector2(556, 192), "bag": Vector2(205, 303),
 }
 
-var quality: int = Cfg.Q.HIGH
+var quality: int = Cfg.Q.ULTRA
 var fx_on := true
 var k := 1.0                     # 放大倍数：窗口像素 ÷ 设计像素
 var off := Vector2.ZERO          # 640×360 的设计区域在窗口里的左上角（窗口像素）
@@ -88,8 +89,8 @@ var _demo_time := 0.0
 func _ready() -> void:
 	is_web = OS.has_feature("web")
 	args = Cfg.args()
-	var qi := Cfg.Q_NAMES.find(String(args.get("q", "high")))
-	quality = qi if qi >= 0 else Cfg.Q.HIGH
+	var qi := Cfg.Q_NAMES.find(String(args.get("q", "")))
+	quality = qi if qi >= 0 else _default_quality()
 	fx_on = String(args.get("fx", "1")) != "0"
 	_gi_requested = String(args.get("gi", "1")) != "0"
 	var divisor := String(args.get("gir", str(GI.DEFAULT_DIVISOR)))
@@ -242,6 +243,16 @@ func _make_pass(shader: Shader) -> Array:
 	r.material = m
 	vp.add_child(r)
 	return [vp, m]
+
+
+func _default_quality() -> int:
+	if not is_web:
+		return Cfg.Q.HIGH if OS.has_feature("mobile") else Cfg.Q.ULTRA
+	# iPad 的 Safari 可报告 Macintosh，结合触点数识别其桌面模式。
+	var mobile := bool(JavaScriptBridge.eval(
+		"/Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) || " +
+		"(/Macintosh/i.test(navigator.userAgent) && navigator.maxTouchPoints > 1)", true))
+	return Cfg.Q.HIGH if mobile else Cfg.Q.ULTRA
 
 
 func _gi_strength(key: String, fallback: float) -> float:
