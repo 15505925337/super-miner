@@ -1,4 +1,4 @@
-// 只在物件原图的轮廓内提亮，熔岩层的岩浆反光也走同一道遮罩。
+// 只在物件原图的轮廓内提亮，主光与岩浆反光各自保护深色描边。
 shader_type canvas_item;
 
 uniform vec4 light_col : source_color = vec4(1.0);
@@ -22,19 +22,23 @@ void vertex() {
 	tint = COLOR;
 }
 
+float in_texture(vec2 uv) {
+	// 原生尺寸的贴图可以裁到边，越过贴图的地方算透明。
+	vec2 inside = step(vec2(0.0), uv) * step(uv, vec2(1.0));
+	return inside.x * inside.y;
+}
+
 void fragment() {
 	vec4 base = texture(TEXTURE, UV);
 	float luma = dot(base.rgb, vec3(0.2126, 0.7152, 0.0722));
-	if (base.a >= 0.95 && luma > 0.36) {
+	if (base.a >= 0.95 && (luma > 0.36 || under_col.a > 0.0)) {
 		vec2 radius = rim_px * TEXTURE_PIXEL_SIZE;
 		float outside = 0.0;
 		vec2 inward = vec2(0.0);
 		for (int i = 0; i < 8; i++) {
 			vec2 direction = SAMPLE_DIRS[i];
 			vec2 uv = UV + direction * radius;
-			// 原生尺寸的贴图可以裁到边，越过贴图的地方也算透明。
-			vec2 inside = step(vec2(0.0), uv) * step(uv, vec2(1.0));
-			float alpha = textureLod(TEXTURE, uv, 0.0).a * inside.x * inside.y;
+			float alpha = textureLod(TEXTURE, uv, 0.0).a * in_texture(uv);
 			outside += 1.0 - alpha;
 			inward += direction * alpha;
 		}
@@ -42,9 +46,20 @@ void fragment() {
 		float coverage = smoothstep(0.0, 4.0, outside);
 		inward /= max(length(inward), 0.001);
 		float upper = rim_strength * smoothstep(0.0, 0.65, dot(inward, light_axis));
-		float lower = under_col.a * smoothstep(0.0, 0.65, dot(inward, under_axis));
 		float surface = smoothstep(0.36, 0.55, luma);
-		vec3 light = (light_col.rgb * upper + under_col.rgb * lower) * coverage * surface * light_fade;
+		vec3 light = light_col.rgb * upper * coverage * surface * light_fade;
+		float lower_facing = dot(inward, under_axis);
+		if (under_col.a > 0.0 && lower_facing > 0.0 && outside > 0.0) {
+			// 沿轮廓法线向外探一格。探到透明区时保留原色，给最外一格留出描边。
+			vec2 outline_uv = UV - inward * radius / 3.0;
+			float outline_alpha = textureLod(TEXTURE, outline_uv, 0.0).a * in_texture(outline_uv);
+			float inner = smoothstep(0.5, 1.0, outline_alpha);
+			// 背光面也接到反光。在更暗的像素上只压低强度，让亮带经过深色块时仍连续。
+			float shade = mix(0.40, 1.0, smoothstep(0.18, 0.28, luma));
+			float lower = under_col.a * smoothstep(0.0, 0.65, lower_facing);
+			float lower_coverage = smoothstep(0.0, 2.0, outside);
+			light += under_col.rgb * lower * lower_coverage * inner * shade * light_fade;
+		}
 		// 用滤色提亮原色。光只抬高低于泛光起始值的通道，减少沿轮廓向外泛白。
 		base.rgb += min((1.0 - base.rgb) * light, max(vec3(0.82) - base.rgb, vec3(0.0)));
 	}
